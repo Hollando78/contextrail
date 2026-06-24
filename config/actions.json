@@ -1,6 +1,6 @@
 [
-  { "id": "launch-editor", "label": "Launch Editor", "icon": "📝", "kind": "app", "target": "notepad", "group": "Tools" },
-  { "id": "open-files", "label": "Open Files", "icon": "📁", "kind": "app", "target": "explorer", "group": "Tools" },
-  { "id": "open-docs", "label": "Open Docs", "icon": "📚", "kind": "url", "target": "https://code.claude.com/docs", "group": "Links" },
-  { "id": "open-repo", "label": "Open Repo", "icon": "🌐", "kind": "url", "target": "https://github.com", "group": "Links" }
+  { "id": "launch-editor", "label": "Launch Editor", "kind": "app", "target": "notepad", "group": "Tools" },
+  { "id": "open-files", "label": "Open Files", "kind": "app", "target": "explorer", "group": "Tools" },
+  { "id": "open-docs", "label": "Open Docs", "kind": "url", "target": "https://code.claude.com/docs", "group": "Links" },
+  { "id": "open-repo", "label": "Open Repo", "kind": "url", "target": "https://github.com", "group": "Links" }
 ]

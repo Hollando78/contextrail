@@ -1,0 +1,122 @@
+/*
+ * ContextRail design system — "Signal Rail".
+ * A calm instrument-console aesthetic: anodized graphite housing, hairline rails,
+ * monospace telemetry, one warm "live current" identity color (signal amber).
+ * Shared by the desklet and the host console. Tokens + reusable primitives.
+ */
+:root {
+  color-scheme: dark;
+
+  /* ---- Color: instrument housing ---- */
+  --ink: #0b0e13;
+  --ink-2: #0e131b;
+  --housing: #131820;
+  --housing-2: #1a212c;
+  --housing-3: #222b38;
+  --rail: #262f3b;
+  --rail-2: #36414f;
+  --text: #e7ebf1;
+  --muted: #8b94a4;
+  --muted-2: #5a6474;
+
+  /* ---- Color: signal (identity) + status ---- */
+  --signal: #f3b43a;          /* live current / active / identity */
+  --signal-soft: rgba(243, 180, 58, 0.14);
+  --signal-dim: #4f4426;      /* de-energised rail node */
+  --ok: #57d9a3;
+  --warn: #ff9f45;
+  --fault: #fb6176;
+  --cool: #80b6c6;            /* secondary/info, used sparingly */
+
+  /* ---- Type ---- */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  /* ---- Radius / space / elevation / motion ---- */
+  --r-tile: 14px;
+  --r-card: 12px;
+  --r-ctl: 10px;
+  --r-pill: 999px;
+  --e-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 14px 36px -26px rgba(0, 0, 0, 0.9);
+  --e-2: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 22px 50px -28px rgba(0, 0, 0, 0.95);
+  --t: 160ms cubic-bezier(0.2, 0.7, 0.3, 1);
+  --hair: 1px solid var(--rail);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; }
+body {
+  background:
+    radial-gradient(1100px 520px at 8% -10%, rgba(243, 180, 58, 0.07), transparent 60%),
+    radial-gradient(900px 480px at 100% -6%, rgba(128, 182, 198, 0.05), transparent 55%),
+    linear-gradient(180deg, var(--ink-2), var(--ink));
+  color: var(--text);
+  font: 15px/1.5 var(--font-sans);
+}
+
+/* ---- Telemetry / eyebrow ---- */
+.eyebrow {
+  font: 600 11px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---- Signal rail (signature) ---- */
+.rail-line {
+  position: relative; height: 1px; width: 100%;
+  background: linear-gradient(90deg, transparent, var(--rail-2) 12%, var(--rail-2) 88%, transparent);
+}
+.rail-line .node {
+  position: absolute; top: 50%; left: var(--node-x, 22px); transform: translate(-50%, -50%);
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--signal-dim); transition: background var(--t), box-shadow var(--t);
+}
+body[data-s="live"] .rail-line .node {
+  background: var(--signal);
+  box-shadow: 0 0 0 0 var(--signal-soft);
+  animation: rail-pulse 2.4s ease-out infinite;
+}
+@keyframes rail-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(243, 180, 58, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(243, 180, 58, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(243, 180, 58, 0); }
+}
+
+/* ---- Status pill ---- */
+.pill { display: inline-flex; align-items: center; gap: 8px; font: 600 11px/1 var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); transition: background var(--t); }
+.pill[data-s="live"] { color: var(--signal); } .pill[data-s="live"] .dot { background: var(--signal); }
+.pill[data-s="connecting"], .pill[data-s="reconnecting"] { color: var(--warn); }
+.pill[data-s="connecting"] .dot, .pill[data-s="reconnecting"] .dot { background: var(--warn); }
+
+/* ---- Socket (recessed glyph holder) ---- */
+.socket {
+  display: grid; place-items: center; border-radius: 11px;
+  background: radial-gradient(120% 120% at 50% 20%, var(--housing-3), var(--housing));
+  border: 1px solid var(--rail-2);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 -6px 14px -10px rgba(0, 0, 0, 0.8) inset;
+}
+
+/* ---- Card (instrument readout) ---- */
+.card {
+  background: linear-gradient(180deg, var(--housing-2), var(--housing));
+  border: var(--hair); border-radius: var(--r-card); padding: 13px 15px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+/* ---- Button ---- */
+.btn {
+  font: 620 14px/1 var(--font-sans); color: #07101a; cursor: pointer;
+  background: linear-gradient(180deg, #ffd071, var(--signal)); border: 0; border-radius: var(--r-ctl);
+  padding: 11px 16px; box-shadow: var(--e-1);
+}
+.btn.ghost { color: var(--text); background: var(--housing-2); border: 1px solid var(--rail-2); }
+.btn:active { transform: translateY(1px); }
+
+/* Accessibility floor */
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}

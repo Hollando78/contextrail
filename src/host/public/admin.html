@@ -4,79 +4,95 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ContextRail · Host Console</title>
+    <link rel="stylesheet" href="/tokens.css?v=2" />
     <style>
-      :root { color-scheme: dark; }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0; min-height: 100vh; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background: radial-gradient(1200px 600px at 50% -10%, #18213f, #0b1020 60%); color: #e6ebff;
-        display: flex; flex-direction: column; align-items: center; padding: 32px 16px;
-      }
-      h1 { font-size: 22px; margin: 0 0 2px; letter-spacing: 0.3px; }
-      .sub { color: #8d99c4; font-size: 13px; margin-bottom: 24px; }
-      .card {
-        background: #121a33; border: 1px solid #243056; border-radius: 16px; padding: 24px;
-        width: min(440px, 100%); box-shadow: 0 20px 60px -30px #000;
-      }
-      .roles { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-      .roles button {
-        flex: 1 1 30%; background: #1b2547; color: #c7d2ff; border: 1px solid #2c3a66;
-        border-radius: 10px; padding: 10px 8px; font-size: 14px; font-weight: 600; cursor: pointer;
-      }
-      .roles button.active { background: #2b6cff; color: #fff; border-color: #2b6cff; }
-      .qrwrap {
-        background: #fff; border-radius: 12px; padding: 14px; display: flex; align-items: center;
-        justify-content: center; aspect-ratio: 1; margin-bottom: 16px;
-      }
+      body { min-height: 100vh; }
+      .bar { display: flex; align-items: center; gap: 13px; padding: 18px 24px 14px; max-width: 980px; margin: 0 auto; }
+      .bar .badge { width: 40px; height: 40px; flex: 0 0 auto; color: var(--signal); }
+      .bar .badge svg { width: 22px; height: 22px; }
+      .bar .title { font: 700 20px/1.1 var(--font-sans); margin-top: 3px; }
+      .bar .host { margin-left: auto; font: 500 12px/1 var(--font-mono); color: var(--cool); letter-spacing: 0.03em; }
+      .wrap { width: 100%; max-width: 980px; margin: 0 auto; padding: 20px 24px 36px;
+        display: grid; grid-template-columns: minmax(0, 380px) 1fr; gap: 20px; align-items: start; }
+      @media (max-width: 720px) { .wrap { grid-template-columns: 1fr; } }
+      .panel { padding: 20px; }
+      .panel > .eyebrow { display: block; margin-bottom: 14px; }
+
+      .roles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+      .roles button { flex: 1 1 28%; background: var(--housing-2); color: var(--muted); border: 1px solid var(--rail-2);
+        border-radius: var(--r-ctl); padding: 9px 8px; font: 600 13px var(--font-sans); cursor: pointer; transition: var(--t); }
+      .roles button:hover { color: var(--text); border-color: #4a566a; }
+      .roles button.active { background: linear-gradient(180deg, #ffd071, var(--signal)); color: #07101a; border-color: var(--signal); }
+
+      .field { display: block; margin-bottom: 16px; }
+      .field > .eyebrow { display: block; margin-bottom: 6px; }
+      #addr { width: 100%; background: var(--housing-2); color: var(--text); border: 1px solid var(--rail-2);
+        border-radius: var(--r-ctl); padding: 10px; font: 500 13px var(--font-mono); }
+
+      .qrwrap { background: #fff; border-radius: 12px; padding: 14px; display: grid; place-items: center; aspect-ratio: 1;
+        margin-bottom: 14px; border: 1px solid var(--rail-2); box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset; }
       .qrwrap img { width: 100%; height: 100%; image-rendering: pixelated; }
-      .qrwrap.empty { background: #0f1730; color: #66719c; font-size: 14px; }
-      .url { font-size: 12px; color: #9fb0e0; word-break: break-all; text-align: center; margin-bottom: 6px; }
-      .meta { display: flex; justify-content: space-between; font-size: 12px; color: #8d99c4; }
-      .count { color: #7fe7c4; }
-      .ttl b { color: #ffcf99; }
-      .hint { font-size: 12px; color: #66719c; margin-top: 18px; max-width: 440px; text-align: center; }
-      .devices { margin-top: 18px; }
-      .devices-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-      .dev { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #243056; border-radius: 10px; margin-bottom: 8px; background: #0f1730; }
-      .dev .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
-      .dev .dot.on { background: #7fe7c4; box-shadow: 0 0 6px #7fe7c4; }
-      .dev .dot.off { background: #4a5578; }
+      .qrwrap.empty { background: var(--housing); color: var(--muted-2); font: 400 13px var(--font-sans); text-align: center; }
+      .url { font: 400 11.5px/1.5 var(--font-mono); color: var(--cool); word-break: break-all; text-align: center; margin-bottom: 8px; }
+      .meta { display: flex; justify-content: center; font: 500 11px var(--font-mono); letter-spacing: 0.08em; color: var(--muted-2); text-transform: uppercase; }
+      .meta b { color: var(--signal); }
+      .hint { font: 400 12px/1.6 var(--font-sans); color: var(--muted-2); margin-top: 16px; }
+      .hint b { color: var(--muted); }
+      code { background: var(--housing); border: var(--hair); padding: 1px 6px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; }
+
+      .devices-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+      .devices-head .eyebrow { margin: 0; }
+      #count { font: 600 11px var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ok); }
+      .dev { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 8px;
+        border: var(--hair); border-radius: var(--r-card); background: linear-gradient(180deg, var(--housing-2), var(--housing));
+        box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset; }
+      .dev .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--muted-2); }
+      .dev .dot.on { background: var(--signal); box-shadow: 0 0 9px rgba(243,180,58,0.55); }
+      .dev .dot.off { background: var(--muted-2); }
       .dev .info { flex: 1 1 auto; min-width: 0; }
-      .dev .id { font-size: 12px; color: #c7d2ff; font-family: ui-monospace, monospace; }
-      .dev .sub { font-size: 11px; color: #66719c; }
-      .dev select { background: #1b2547; color: #c7d2ff; border: 1px solid #2c3a66; border-radius: 8px; padding: 6px 8px; font-size: 12px; }
-      .dev .forget { background: #3a1b22; color: #ff9aa6; border: 1px solid #6a2a36; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+      .dev .id { font: 500 12.5px var(--font-mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dev .sub { font: 400 11px var(--font-mono); color: var(--muted-2); margin-top: 3px; }
+      .dev select { background: var(--housing-2); color: var(--text); border: 1px solid var(--rail-2); border-radius: 8px; padding: 6px 8px; font: 500 12px var(--font-mono); }
+      .dev .forget { background: rgba(251,97,118,0.1); color: var(--fault); border: 1px solid #6a2a36; border-radius: 8px; padding: 6px 11px; font: 600 12px var(--font-sans); cursor: pointer; }
       .dev .forget:active { transform: translateY(1px); }
-      .empty-note { color: #66719c; font-size: 13px; }
-      code { background: #0f1730; padding: 1px 5px; border-radius: 4px; }
+      .empty-note { color: var(--muted-2); font: 400 13px var(--font-sans); }
     </style>
   </head>
   <body>
-    <h1>ContextRail · Host Console</h1>
-    <div class="sub" id="hosturl">—</div>
-    <div class="card">
-      <div class="roles" id="roles"></div>
-      <label style="font-size:12px;color:#8d99c4;display:block;margin-bottom:14px;">
-        host address
-        <select id="addr" style="width:100%;margin-top:4px;background:#1b2547;color:#c7d2ff;border:1px solid #2c3a66;border-radius:8px;padding:8px;font-size:13px;"></select>
-      </label>
-      <div class="qrwrap empty" id="qrwrap">pick a role to generate a pairing code</div>
-      <div class="url" id="url"></div>
-      <div class="meta">
-        <span class="ttl" id="ttl"></span>
+    <header class="bar">
+      <div class="socket badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 12h18"/><circle cx="9" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg></div>
+      <div>
+        <div class="eyebrow">contextrail · host</div>
+        <div class="title">Host Console</div>
       </div>
-    </div>
-    <div class="hint">
-      Scan the QR with a spare phone/tablet on the same Wi-Fi. Accept the self-signed certificate
-      warning (<b>Advanced → Proceed</b>). The code auto-refreshes before it expires.
-    </div>
+      <div class="host" id="hosturl">—</div>
+    </header>
+    <div class="rail-line"><span class="node"></span></div>
 
-    <div class="card devices">
-      <div class="devices-head">
-        <h2 style="margin:0;">Paired devices</h2>
-        <span class="count" id="count">— paired</span>
-      </div>
-      <div id="devicelist"></div>
+    <div class="wrap">
+      <section class="card panel">
+        <span class="eyebrow">Pair a device</span>
+        <div class="roles" id="roles"></div>
+        <label class="field">
+          <span class="eyebrow">Host address</span>
+          <select id="addr"></select>
+        </label>
+        <div class="qrwrap empty" id="qrwrap">pick a role to generate a pairing code</div>
+        <div class="url" id="url"></div>
+        <div class="meta"><span class="ttl" id="ttl"></span></div>
+        <div class="hint">
+          Scan with a spare phone/tablet on the same network. Accept the certificate warning
+          (<b>Advanced → Proceed</b>) if self-signed. The code auto-refreshes before it expires.
+        </div>
+      </section>
+
+      <section class="card panel">
+        <div class="devices-head">
+          <span class="eyebrow">Paired devices</span>
+          <span id="count">— paired</span>
+        </div>
+        <div id="devicelist"></div>
+      </section>
     </div>
 
     <script>

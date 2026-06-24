@@ -29,8 +29,18 @@ interface Session {
 
 const el = (id: string) => document.getElementById(id);
 
-const ROLE_ICON: Record<string, string> = {
-  Project: '📋', Actions: '⚡', Status: '📊', Capture: '✏️', Logs: '📜', AI: '🤖',
+/** Instrument-style 3-letter role codes (no emoji). */
+const ROLE_CODE: Record<string, string> = {
+  Project: 'PRJ', Actions: 'ACT', Status: 'STA', Capture: 'CAP', Logs: 'LOG', AI: 'AI',
+};
+
+/** Crisp line-art icons by action kind (stroke = currentColor). */
+const ICONS: Record<string, string> = {
+  app: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><circle cx="6.2" cy="6.5" r="0.4" fill="currentColor"/></svg>',
+  url: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/></svg>',
+  script: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></svg>',
+  ssh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11"/><path d="M11 4l3 3-3 3"/><path d="M20 17H9"/><path d="M13 20l-3-3 3-3"/></svg>',
+  default: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l8 6-8 6z"/></svg>',
 };
 
 function fmt(v: unknown): string {
@@ -207,7 +217,7 @@ class DeskletClient {
   private renderShell(): void {
     el('role').textContent = this.session.role;
     el('role-sub').textContent = 'desklet';
-    el('role-badge').textContent = ROLE_ICON[this.session.role] ?? '◆';
+    el('role-badge').textContent = ROLE_CODE[this.session.role] ?? '··';
     el('device').textContent = this.session.deviceId;
     el('context-title').textContent = `${this.session.role} context`;
     this.renderActions();
@@ -230,7 +240,7 @@ class DeskletClient {
     for (const a of list) {
       const tile = document.createElement('div');
       tile.className = 'tile';
-      const ic = document.createElement('div'); ic.className = 'ic'; ic.textContent = a.icon ?? '▶';
+      const ic = document.createElement('div'); ic.className = 'ic'; ic.innerHTML = ICONS[a.kind] ?? ICONS['default'];
       const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.textContent = a.label ?? a.id;
       const kind = document.createElement('div'); kind.className = 'kind'; kind.textContent = a.kind ?? '';
       const state = document.createElement('div'); state.className = 'state';
@@ -262,6 +272,7 @@ class DeskletClient {
   private setStatus(text: string, state: string): void {
     el('status').textContent = text;
     el('status-wrap').setAttribute('data-s', state);
+    document.body.setAttribute('data-s', state); // drives the signal-rail node pulse
   }
 
   private log(msg: string, cls = ''): void {
