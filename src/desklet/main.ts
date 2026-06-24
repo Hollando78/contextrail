@@ -8,7 +8,8 @@
  * its role from the host without re-pairing. (SUB-DCF-051..055, SUB-KWD-068/074)
  */
 declare const navigator: { userAgent: string };
-declare const location: { href: string; search: string; host: string; protocol: string };
+declare const location: { href: string; search: string; host: string; protocol: string; pathname: string };
+declare const history: { replaceState(state: unknown, title: string, url: string): void };
 declare const localStorage: { getItem(k: string): string | null; setItem(k: string, v: string): void };
 declare const document: any;
 declare const window: any;
@@ -71,12 +72,17 @@ class DeskletClient {
   private ws: any;
   private backoff = 500;
   private lastContext = 0;
-  private firstConnect = true;
+  private firstConnect: boolean;
   private staleTimer = 0;
   private pingTimer = 0;
-  private readonly context: Record<string, unknown> = {};
+  private context: Record<string, unknown> = {};
 
-  constructor(private session: Session) {}
+  /** freshToken: true only right after pairing — the single-use session token is
+   *  valid for exactly one connect. A session loaded from storage uses the
+   *  token-less device-ledger reconnect path instead. */
+  constructor(private session: Session, freshToken: boolean) {
+    this.firstConnect = freshToken;
+  }
 
   start(): void {
     this.renderShell();
@@ -95,9 +101,11 @@ class DeskletClient {
 
   private connect(): void {
     this.setStatus('connecting…');
+    let opened = false;
     const ws = new WebSocket(this.url(this.firstConnect));
     this.ws = ws;
     ws.onopen = () => {
+      opened = true;
       this.firstConnect = false;
       this.backoff = 500;
       this.lastContext = Date.now();
@@ -113,6 +121,9 @@ class DeskletClient {
     ws.onmessage = (ev: any) => this.onFrame(JSON.parse(ev.data));
     ws.onclose = () => {
       if (this.pingTimer) window.clearInterval(this.pingTimer);
+      // The session token is single-use. If a token attempt never opened, stop
+      // retrying it and fall back to the token-less reconnect (device-ledger) path.
+      if (!opened) this.firstConnect = false;
       this.scheduleReconnect();
     };
     ws.onerror = () => ws.close();
@@ -136,6 +147,18 @@ class DeskletClient {
       el('stale').style.display = frame.payload.stale ? 'block' : 'none';
     } else if (frame.kind === 'ack') {
       this.log(`intent ${frame.correlationId}: ${frame.payload?.status ?? 'ok'}`);
+    } else if (frame.kind === 'control' && frame.payload?.type === 'role') {
+      // The host re-binds the role on reconnect after a switch — adopt it so the
+      // display (label + role-specific actions) matches the streamed context.
+      const role = frame.payload.role;
+      if (role && role !== this.session.role) {
+        this.session.role = role;
+        saveSession(this.session);
+        this.context = {}; // drop the previous role's view; new role's context follows
+        this.renderShell();
+        this.renderContext({ version: 0, digest: '' });
+        this.log(`role changed → ${role}`);
+      }
     }
   }
 
@@ -188,13 +211,28 @@ async function boot(): Promise<void> {
   const params = new URLSearchParams(location.search);
   const ott = params.get('ott');
   let session = loadSession();
+  let freshToken = false;
 
-  try {
-    if (ott) session = await pair(ott);
-  } catch (err) {
-    el('status').textContent = 'pairing failed: ' + (err as Error).message;
-    el('pair-hint').style.display = 'block';
-    return;
+  if (ott) {
+    try {
+      session = await pair(ott);
+      freshToken = true; // single-use token is valid for exactly the next connect
+    } catch (err) {
+      // The OTT is single-use and short-lived, so on a page refresh it's already
+      // dead. If we already have a paired session, reconnect with it (device
+      // ledger) instead of failing; only surface an error if we have nothing.
+      if (!session) {
+        el('status').textContent = 'pairing failed: ' + (err as Error).message;
+        el('pair-hint').style.display = 'block';
+        return;
+      }
+    }
+    // Strip the OTT from the URL so a refresh doesn't re-attempt a dead pairing.
+    try {
+      history.replaceState(null, '', location.pathname);
+    } catch {
+      /* ignore */
+    }
   }
 
   if (!session) {
@@ -202,7 +240,7 @@ async function boot(): Promise<void> {
     el('pair-hint').style.display = 'block';
     return;
   }
-  new DeskletClient(session).start();
+  new DeskletClient(session, freshToken).start();
 }
 
 window.addEventListener('DOMContentLoaded', () => void boot());

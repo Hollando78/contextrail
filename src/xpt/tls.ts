@@ -9,6 +9,9 @@
  * is inherent to a local-first, no-PKI deployment.
  */
 import { networkInterfaces } from 'node:os';
+import { X509Certificate } from 'node:crypto';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import selfsigned from 'selfsigned';
 
 export interface TlsMaterial {
@@ -41,6 +44,42 @@ export function lanIPv4Addresses(): string[] {
     }
   }
   return out.sort((a, b) => lanRank(a) - lanRank(b));
+}
+
+/**
+ * Load a persisted self-signed cert if it exists and still covers every current
+ * LAN address; otherwise generate a fresh one and (when persisting) save it. A
+ * stable cert lets paired phones re-establish WSS after a host restart without
+ * re-accepting a new certificate. (Trades off SUB-XPT-039's per-restart rotation
+ * for cross-restart reconnect; gated by config `tls.persist`.)
+ */
+export function loadOrCreateTls(commonName: string, dataDir: string, persist: boolean): TlsMaterial {
+  const lan = lanIPv4Addresses();
+  const certPath = join(dataDir, 'tls-cert.pem');
+  const keyPath = join(dataDir, 'tls-key.pem');
+
+  if (persist && existsSync(certPath) && existsSync(keyPath)) {
+    try {
+      const cert = readFileSync(certPath, 'utf8');
+      const key = readFileSync(keyPath, 'utf8');
+      const san = new X509Certificate(cert).subjectAltName ?? '';
+      const covered = ['127.0.0.1', ...lan].every((ip) => san.includes(ip));
+      if (covered) return { key, cert, lanAddresses: lan };
+    } catch {
+      /* fall through to regenerate */
+    }
+  }
+
+  const fresh = generateSelfSigned(commonName);
+  if (persist) {
+    try {
+      writeFileSync(certPath, fresh.cert);
+      writeFileSync(keyPath, fresh.key);
+    } catch {
+      /* non-fatal: run with an in-memory cert this session */
+    }
+  }
+  return fresh;
 }
 
 export function generateSelfSigned(commonName: string): TlsMaterial {

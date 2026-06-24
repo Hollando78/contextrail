@@ -36,6 +36,13 @@ export interface HostConfig {
   tls: {
     /** Common name for the generated self-signed certificate. (SUB-XPT-039) */
     commonName: string;
+    /**
+     * Persist the self-signed cert across restarts (default true) so paired
+     * phones can re-establish WSS after a host restart without re-accepting a new
+     * cert. SUB-XPT-039 specifies rotation on each restart; set false to restore
+     * that behaviour (at the cost of breaking silent reconnect across restarts).
+     */
+    persist?: boolean;
   };
 }
 
@@ -67,6 +74,7 @@ export const CONFIG_SCHEMA = {
       required: ['commonName'],
       properties: {
         commonName: { type: 'string', minLength: 1 },
+        persist: { type: 'boolean', default: true },
       },
     },
   },
@@ -86,6 +94,7 @@ export const DEFAULT_CONFIG: HostConfig = {
   },
   tls: {
     commonName: 'contextrail.local',
+    persist: true,
   },
 };
 

@@ -15,7 +15,7 @@ import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../cor
 import { SERVICE } from '../core/services.js';
 import type { Role } from '../core/constants.js';
 import type { RoleProjection } from '../core/types.js';
-import { generateSelfSigned, type TlsMaterial } from './tls.js';
+import { loadOrCreateTls, type TlsMaterial } from './tls.js';
 import { ConnectionRegistry } from './connection-registry.js';
 import { ChannelMultiplexer } from './channel-multiplexer.js';
 import { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
@@ -56,7 +56,7 @@ export class LocalTransportServer extends BaseSubsystem {
     const ctx = this.services.get<WorkspaceContextStore>(SERVICE.ContextStore);
     const pairing = this.services.get<DeskletPairingAndIdentity>(SERVICE.Pairing);
 
-    this.tls = generateSelfSigned(this.config.tls.commonName);
+    this.tls = loadOrCreateTls(this.config.tls.commonName, this.dataDir, this.config.tls.persist !== false);
     this.registry = new ConnectionRegistry();
     this.mux = new ChannelMultiplexer(this.registry, guard, this.log.child('mux'));
     this.heartbeat = new TransportHeartbeatMonitor(this.registry, ledger, this.log.child('hbm'), (id) =>
@@ -121,6 +121,23 @@ export class LocalTransportServer extends BaseSubsystem {
     this.heartbeat?.stop();
     this.gateway?.closeAll();
     await Promise.all([closeServer(this.httpsServer), closeServer(this.loopbackServer)]);
+  }
+
+  /** Device ids with a currently-open WebSocket connection. */
+  connectedDeviceIds(): string[] {
+    return this.registry ? this.registry.list().map((c) => c.deskletId) : [];
+  }
+
+  /** Close a specific desklet's connection (used by Forget / Switch-role). */
+  disconnect(deviceId: string): void {
+    const conn = this.registry?.get(deviceId);
+    if (!conn) return;
+    try {
+      conn.socket.close(1000, 'admin');
+    } catch {
+      /* already closing */
+    }
+    this.registry.remove(deviceId);
   }
 
   override health(): SubsystemHealth {

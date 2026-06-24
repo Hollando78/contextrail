@@ -12,7 +12,8 @@ import type { MaintenanceConfigurationInterface } from '../acg/maintenance-confi
 import type { LockStateController } from '../slm/lock-state-controller.js';
 import type { HostAuthenticator } from '../slm/host-authenticator.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
-import { HostAdminApi } from './admin-api.js';
+import type { RoleAssignmentManager } from '../pair/role-assignment-manager.js';
+import { HostAdminApi, type DeviceControl, type SubscriberControl } from './admin-api.js';
 
 export class HostAdministrationStation extends BaseSubsystem {
   readonly name = 'HostAdministrationStation';
@@ -29,6 +30,9 @@ export class HostAdministrationStation extends BaseSubsystem {
       lock: this.services.get<LockStateController>(SERVICE.LockState),
       authenticator: this.services.get<HostAuthenticator>(SERVICE.HostAuthenticator),
       ledger: this.services.get<DeviceIdentityLedger>(SERVICE.DeviceLedger),
+      roles: this.services.get<RoleAssignmentManager>(SERVICE.RoleAssignment),
+      transport: this.services.get<DeviceControl>(SERVICE.Transport),
+      context: this.services.get<SubscriberControl>(SERVICE.ContextStore),
       dataDir: this.config.dataDir,
       log: this.log.child('api'),
     });

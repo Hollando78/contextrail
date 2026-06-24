@@ -72,7 +72,18 @@ export class WebSocketGateway {
     this.deps.registry.add(deskletId, ws, role);
     this.deps.ledger.touch(deskletId);
     this.log.info('desklet admitted', { deskletId, role });
-    this.deps.onAdmit(deskletId, role);
+
+    // Send the authoritative bound role BEFORE the initial context snapshot, so a
+    // role switch (re-bound on reconnect) updates the client's display and the
+    // following snapshot repopulates the new role's context. (Order matters: the
+    // desklet clears its view on a role change.)
+    try {
+      ws.send(JSON.stringify({ kind: 'control', payload: { type: 'role', role }, timestamp: new Date().toISOString() }));
+    } catch {
+      /* socket may have closed */
+    }
+
+    this.deps.onAdmit(deskletId, role); // pushes the initial role-scoped snapshot
 
     ws.on('pong', () => this.deps.heartbeat.onPong(deskletId));
     ws.on('message', (data) => this.onMessage(deskletId, role, data.toString()));

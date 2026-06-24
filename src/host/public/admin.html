@@ -35,6 +35,19 @@
       .count { color: #7fe7c4; }
       .ttl b { color: #ffcf99; }
       .hint { font-size: 12px; color: #66719c; margin-top: 18px; max-width: 440px; text-align: center; }
+      .devices { margin-top: 18px; }
+      .devices-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+      .dev { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #243056; border-radius: 10px; margin-bottom: 8px; background: #0f1730; }
+      .dev .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+      .dev .dot.on { background: #7fe7c4; box-shadow: 0 0 6px #7fe7c4; }
+      .dev .dot.off { background: #4a5578; }
+      .dev .info { flex: 1 1 auto; min-width: 0; }
+      .dev .id { font-size: 12px; color: #c7d2ff; font-family: ui-monospace, monospace; }
+      .dev .sub { font-size: 11px; color: #66719c; }
+      .dev select { background: #1b2547; color: #c7d2ff; border: 1px solid #2c3a66; border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+      .dev .forget { background: #3a1b22; color: #ff9aa6; border: 1px solid #6a2a36; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+      .dev .forget:active { transform: translateY(1px); }
+      .empty-note { color: #66719c; font-size: 13px; }
       code { background: #0f1730; padding: 1px 5px; border-radius: 4px; }
     </style>
   </head>
@@ -51,12 +64,19 @@
       <div class="url" id="url"></div>
       <div class="meta">
         <span class="ttl" id="ttl"></span>
-        <span class="count" id="count">— paired</span>
       </div>
     </div>
     <div class="hint">
       Scan the QR with a spare phone/tablet on the same Wi-Fi. Accept the self-signed certificate
       warning (<b>Advanced → Proceed</b>). The code auto-refreshes before it expires.
+    </div>
+
+    <div class="card devices">
+      <div class="devices-head">
+        <h2 style="margin:0;">Paired devices</h2>
+        <span class="count" id="count">— paired</span>
+      </div>
+      <div id="devicelist"></div>
     </div>
 
     <script>
@@ -119,11 +139,72 @@
         }
       }
 
-      async function refreshCount() {
+      function ago(iso) {
+        const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+        if (s < 60) return s + 's ago';
+        if (s < 3600) return Math.round(s / 60) + 'm ago';
+        return Math.round(s / 3600) + 'h ago';
+      }
+
+      async function deviceOp(deviceId, op, role) {
         try {
-          const res = await fetch('/health');
-          await res.json();
-        } catch {}
+          const res = await fetch('/admin/device', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ op, deviceId, role }),
+          });
+          if (!res.ok) {
+            const e = await res.json();
+            alert('Failed: ' + (e.error || e.message || res.status));
+          }
+        } catch (e) { alert('Failed: ' + e.message); }
+        refreshDevices();
+      }
+
+      function renderDevices(devices, roles) {
+        const list = $('devicelist');
+        if (!devices.length) { list.innerHTML = '<div class="empty-note">No devices paired yet.</div>'; return; }
+        list.innerHTML = '';
+        for (const d of devices) {
+          const row = document.createElement('div');
+          row.className = 'dev';
+
+          const dot = document.createElement('span');
+          dot.className = 'dot ' + (d.connected ? 'on' : 'off');
+          dot.title = d.connected ? 'connected' : 'offline';
+
+          const info = document.createElement('div');
+          info.className = 'info';
+          info.innerHTML = '<div class="id">' + d.deviceId + '</div>' +
+            '<div class="sub">' + (d.connected ? 'connected' : 'offline') + ' · seen ' + ago(d.lastSeen) + '</div>';
+
+          const sel = document.createElement('select');
+          sel.title = 'switch role';
+          for (const r of roles) {
+            const o = document.createElement('option');
+            o.value = r; o.textContent = r; if (r === d.role) o.selected = true;
+            sel.appendChild(o);
+          }
+          sel.onchange = () => deviceOp(d.deviceId, 'switch-role', sel.value);
+
+          const forget = document.createElement('button');
+          forget.className = 'forget'; forget.textContent = 'Forget';
+          forget.onclick = () => { if (confirm('Forget ' + d.deviceId + '? It will need to re-pair.')) deviceOp(d.deviceId, 'forget'); };
+
+          row.append(dot, info, sel, forget);
+          list.appendChild(row);
+        }
+      }
+
+      async function refreshDevices() {
+        try {
+          const s = await (await fetch('/admin/status')).json();
+          const devices = s.pairedDevices || [];
+          const live = devices.filter((d) => d.connected).length;
+          $('count').textContent = devices.length ? live + ' live · ' + devices.length + ' paired' : 'no devices paired';
+          renderDevices(devices, s.roles || ROLES);
+        } catch {
+          $('count').textContent = '— paired';
+        }
       }
 
       function tick() {
@@ -137,7 +218,9 @@
 
       renderRoles();
       mint();
+      refreshDevices();
       timer = setInterval(tick, 1000);
+      setInterval(refreshDevices, 3000);
     </script>
   </body>
 </html>

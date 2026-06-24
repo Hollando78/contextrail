@@ -61,6 +61,15 @@ export class DeviceIdentityLedger {
     return record;
   }
 
+  /** Reassign a device's bound role and persist (operator switch-role). */
+  async setRole(deviceId: string, role: Role): Promise<boolean> {
+    const rec = this.records.get(deviceId);
+    if (!rec) return false;
+    rec.role = role;
+    await appendFile(this.path, JSON.stringify(rec) + '\n', 'utf8');
+    return true;
+  }
+
   /** Update last-seen (called on heartbeat pong / activity). Read-stable. */
   touch(deviceId: string): void {
     const rec = this.records.get(deviceId);

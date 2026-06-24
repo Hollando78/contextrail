@@ -14,9 +14,22 @@ import type { MaintenanceConfigurationInterface } from '../acg/maintenance-confi
 import type { LockStateController } from '../slm/lock-state-controller.js';
 import type { HostAuthenticator } from '../slm/host-authenticator.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
+import type { RoleAssignmentManager } from '../pair/role-assignment-manager.js';
 import { isContextRailError } from '../core/errors.js';
-import { isRole } from '../core/constants.js';
+import { isRole, ROLES, type Role } from '../core/constants.js';
 import { dataPaths } from '../core/paths.js';
+
+/** Live device controls the admin panel drives (forget / switch-role). */
+export interface DeviceControl {
+  connectedDeviceIds(): string[];
+  disconnect(deviceId: string): void;
+}
+
+/** Context subscriber control (re-bind / drop a desklet's role-scoped stream). */
+export interface SubscriberControl {
+  addSubscriber(deviceId: string, role: Role): void;
+  removeSubscriber(deviceId: string): void;
+}
 
 export interface AdminDeps {
   modeControl: ModeControl;
@@ -24,6 +37,9 @@ export interface AdminDeps {
   lock: LockStateController;
   authenticator: HostAuthenticator;
   ledger: DeviceIdentityLedger;
+  roles: RoleAssignmentManager;
+  transport: DeviceControl;
+  context: SubscriberControl;
   dataDir: string;
   log: Logger;
 }
@@ -40,6 +56,7 @@ export class HostAdminApi implements AdminApi {
       if (req.method === 'POST' && url.pathname === '/admin/allowlist') return await this.allowlist(req, res);
       if (req.method === 'POST' && url.pathname === '/admin/lock') return await this.lock(req, res);
       if (req.method === 'POST' && url.pathname === '/admin/unlock') return await this.unlock(req, res);
+      if (req.method === 'POST' && url.pathname === '/admin/device') return await this.device(req, res);
       this.send(res, 404, { error: 'unknown admin route' });
     } catch (err) {
       if (isContextRailError(err)) return this.send(res, 409, err.toJSON());
@@ -49,11 +66,46 @@ export class HostAdminApi implements AdminApi {
   }
 
   private status(res: ServerResponse): void {
+    const connected = new Set(this.deps.transport.connectedDeviceIds());
     this.send(res, 200, {
       mode: this.deps.modeControl.mode(),
       locked: this.deps.lock.isLocked(),
-      pairedDevices: this.deps.ledger.list().map((d) => ({ deviceId: d.deviceId, role: d.role, lastSeen: d.lastSeen })),
+      roles: ROLES,
+      pairedDevices: this.deps.ledger.list().map((d) => ({
+        deviceId: d.deviceId,
+        role: d.role,
+        pairedAt: d.pairedAt,
+        lastSeen: d.lastSeen,
+        connected: connected.has(d.deviceId),
+      })),
     });
+  }
+
+  /** Device management: forget a device, or switch its bound role. */
+  private async device(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const b = (await body(req)) as { op?: 'forget' | 'switch-role'; deviceId?: string; role?: string };
+    if (!b.deviceId || !this.deps.ledger.get(b.deviceId)) {
+      return this.send(res, 404, { error: 'unknown deviceId' });
+    }
+    if (b.op === 'forget') {
+      this.deps.context.removeSubscriber(b.deviceId);
+      this.deps.roles.release(b.deviceId);
+      await this.deps.ledger.remove(b.deviceId);
+      this.deps.transport.disconnect(b.deviceId); // drop the live socket; it cannot re-pair
+      this.deps.log.info('device forgotten', { deviceId: b.deviceId });
+      return this.send(res, 200, { ok: true });
+    }
+    if (b.op === 'switch-role') {
+      if (!b.role || !isRole(b.role)) return this.send(res, 400, { error: 'invalid role', permitted: ROLES });
+      this.deps.roles.assign(b.deviceId, b.role);
+      await this.deps.ledger.setRole(b.deviceId, b.role);
+      this.deps.context.addSubscriber(b.deviceId, b.role);
+      // Drop the socket so the desklet auto-reconnects and re-binds the new role.
+      this.deps.transport.disconnect(b.deviceId);
+      this.deps.log.info('device role switched', { deviceId: b.deviceId, role: b.role });
+      return this.send(res, 200, { ok: true, role: b.role });
+    }
+    return this.send(res, 400, { error: 'op must be forget|switch-role' });
   }
 
   private async maintenance(req: IncomingMessage, res: ServerResponse): Promise<void> {
