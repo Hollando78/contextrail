@@ -47,6 +47,7 @@ export class WorkspaceContextStore extends BaseSubsystem {
 
   override async start(): Promise<void> {
     await this.rebuildFromLedger();
+    this.seedInitialContext();
 
     this.unsubscribers.push(
       this.bus.on('command:outcome', (o) => this.onCommandOutcome(o)),
@@ -54,10 +55,24 @@ export class WorkspaceContextStore extends BaseSubsystem {
       this.bus.on('desklet:linklost', (p) => this.subscribers.delete(p.deskletId)),
       this.bus.on('lock:engaged', () => this.setLocked(true)),
       this.bus.on('lock:released', () => this.setLocked(false)),
-      this.bus.on('mode:changed', (m) => this.setDegraded(m.to === 'Degraded')),
+      this.bus.on('mode:changed', (m) => this.onModeChanged(m.to)),
     );
     this.services.set(SERVICE.ContextStore, this);
     this.log.info('workspace context store ready', { objects: this.registry.list().length });
+  }
+
+  /** Seed baseline host context so a freshly-joined desklet always renders something. */
+  private seedInitialContext(): void {
+    this.ingest({
+      type: 'raw',
+      writes: [
+        { attributePath: 'workspace.hostMode', newValue: 'Nominal', sourceEventType: 'seed' },
+        { attributePath: 'workspace.health', newValue: 'host online', sourceEventType: 'seed' },
+        { attributePath: 'workspace.toolStatus', newValue: { host: 'running' }, sourceEventType: 'seed' },
+        { attributePath: 'workspace.activeProject', newValue: 'ContextRail', sourceEventType: 'seed' },
+        { attributePath: 'workspace.availableActions', newValue: ['launch-ide', 'open-project-urls', 'restore-layout'], sourceEventType: 'seed' },
+      ],
+    });
   }
 
   override async stop(): Promise<void> {
@@ -158,6 +173,15 @@ export class WorkspaceContextStore extends BaseSubsystem {
         if (snap) this.bus.emit('context:projection', snap);
       }
     }
+  }
+
+  /** Reflect the host mode into context (so desklets see it) and track Degraded. */
+  private onModeChanged(to: string): void {
+    this.ingest({
+      type: 'raw',
+      writes: [{ attributePath: 'workspace.hostMode', newValue: to, sourceEventType: 'mode-change' }],
+    });
+    this.setDegraded(to === 'Degraded');
   }
 
   private setDegraded(degraded: boolean): void {

@@ -29,6 +29,46 @@ function localEcho(intentId: string, actionId: string, note: string): Omit<Comma
   };
 }
 
+/** Repo URL opened by the 'open-project-urls' profile (override via CR_PROJECT_URL). */
+const PROJECT_URL = process.env['CR_PROJECT_URL'] ?? 'https://github.com/Hollando78/contextrail';
+
+/**
+ * Build a real "open this on the host" command. Uses the OS launcher
+ * (start/open/xdg-open) so it returns immediately — the launched app/browser
+ * keeps running independently and isn't caught by the executor's 5s timeout.
+ */
+function osLaunch(target: string): { targetPath: string; args: string[] } {
+  switch (process.platform) {
+    case 'win32':
+      return { targetPath: 'cmd', args: ['/c', 'start', '', target] };
+    case 'darwin':
+      return { targetPath: 'open', args: [target] };
+    default:
+      return { targetPath: 'xdg-open', args: [target] };
+  }
+}
+
+/** Map a tool profile to a concrete, visible host action. */
+function profileCommand(intentId: string, actionId: string, profile: string): Omit<CommandEnvelope, 'permitId'> {
+  let launch: { targetPath: string; args: string[] };
+  switch (profile) {
+    case 'launch-ide':
+      launch = process.platform === 'win32' ? osLaunch('notepad')
+        : process.platform === 'darwin' ? { targetPath: 'open', args: ['-a', 'TextEdit'] }
+        : osLaunch('.');
+      break;
+    case 'open-project-urls':
+      launch = osLaunch(PROJECT_URL);
+      break;
+    case 'restore-layout':
+      launch = process.platform === 'win32' ? { targetPath: 'cmd', args: ['/c', 'start', '', 'explorer', '.'] } : osLaunch('.');
+      break;
+    default:
+      return localEcho(intentId, actionId, `ContextRail: no host command for profile '${profile}'`);
+  }
+  return { actionId, adapterId: 'local', targetPath: launch.targetPath, args: launch.args, env: {}, intentId };
+}
+
 export function resolveIntent(intent: Intent): Resolved | null {
   const { type, payload, intentId } = intent;
 
@@ -37,7 +77,7 @@ export function resolveIntent(intent: Intent): Resolved | null {
       const profile = String(payload['profile'] ?? 'default');
       const actionId = `launch-tool:${profile}`;
       return {
-        envelope: localEcho(intentId, actionId, `ContextRail launched tool profile: ${profile}`),
+        envelope: profileCommand(intentId, actionId, profile),
         principal: 'local',
         conflictKey: intent.targetContextObject ?? 'workspace.openTools',
       };
@@ -46,7 +86,7 @@ export function resolveIntent(intent: Intent): Resolved | null {
       const url = String(payload['url'] ?? '');
       const actionId = `open-url:${url}`;
       return {
-        envelope: localEcho(intentId, actionId, `ContextRail opened URL: ${url}`),
+        envelope: { actionId, adapterId: 'local', ...osLaunch(url), env: {}, intentId },
         principal: 'local',
         conflictKey: intent.targetContextObject ?? 'workspace.openTools',
       };
