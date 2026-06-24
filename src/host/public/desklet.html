@@ -49,6 +49,24 @@
       .tile[data-st="bad"] { border-color: var(--fault); } .tile[data-st="bad"] .state { color: var(--fault); } .tile[data-st="bad"] .state::before { content: "✕"; font-weight: 800; }
       .empty { color: var(--muted-2); font: 400 13.5px/1.5 var(--font-sans); padding: 6px 2px; }
 
+      /* Resource-monitor meters */
+      .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 13px; }
+      .meter { padding: 16px 17px; }
+      .meter .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+      .meter .head .lbl { font: 600 11px/1 var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-2); }
+      .meter .head .val { font: 600 23px/1 var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+      .meter .track { position: relative; height: 10px; margin-top: 13px; border-radius: 6px; background: var(--housing); border: 1px solid var(--rail); overflow: hidden; }
+      .meter .fill { height: 100%; width: 0; border-radius: 6px; background: linear-gradient(90deg, var(--signal), #ffd071); transition: width 0.45s cubic-bezier(0.2,0.7,0.3,1); }
+      .meter.warn .fill { background: linear-gradient(90deg, var(--warn), #ffc89a); }
+      .meter.fault .fill { background: linear-gradient(90deg, var(--fault), #ff9aa6); }
+      .meter .track::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+        background-image: repeating-linear-gradient(90deg, transparent 0 8px, rgba(0,0,0,0.4) 8px 9px); }
+      .meter .sub { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--muted-2); margin-top: 10px; }
+      .meter .spark { margin-top: 12px; height: 32px; }
+      .meter .spark svg { width: 100%; height: 32px; display: block; }
+      .meter .spark polyline { fill: none; stroke: var(--signal); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+      .meter .spark .area { fill: var(--signal-soft); stroke: none; }
+
       /* Context — readout cards */
       .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 11px; }
       .card .k { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted-2); }
@@ -88,6 +106,13 @@
         <div class="grid" id="tiles"></div>
       </section>
 
+      <section id="status-view" class="hidden">
+        <div class="eyebrow sec">Resource Monitor</div>
+        <div class="meters" id="meters"></div>
+        <div class="eyebrow sec">Host</div>
+        <div class="cards" id="readouts"></div>
+      </section>
+
       <section id="context-view">
         <div class="eyebrow sec" id="context-title">Context</div>
         <div class="cards" id="context-cards"><div class="empty">waiting for context…</div></div>
@@ -107,6 +132,6 @@
       <span id="version">—</span>
     </footer>
 
-    <script src="/desklet.js?v=7"></script>
+    <script src="/desklet.js?v=9"></script>
   </body>
 </html>

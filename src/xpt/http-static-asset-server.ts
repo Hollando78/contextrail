@@ -15,7 +15,7 @@
  *   GET  /health      (loopback only) -> subsystem health
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
@@ -37,8 +37,8 @@ const MIME: Record<string, string> = {
 };
 
 export class HttpStaticAssetServer {
-  /** Cache of file bytes + content hash. */
-  private readonly cache = new Map<string, { body: Buffer; etag: string }>();
+  /** Cache of file bytes + content hash, keyed by path and validated against mtime. */
+  private readonly cache = new Map<string, { body: Buffer; etag: string; mtimeMs: number }>();
 
   constructor(
     private readonly pairing: DeskletPairingAndIdentity,
@@ -140,11 +140,19 @@ export class HttpStaticAssetServer {
     const full = join(PUBLIC_DIR, safe);
     if (!full.startsWith(PUBLIC_DIR)) return this.send(res, 403, { error: 'forbidden' });
 
+    let mtimeMs: number;
+    try {
+      mtimeMs = (await stat(full)).mtimeMs;
+    } catch {
+      return this.send(res, 404, { error: 'not found' });
+    }
+    // Serve from cache only while the on-disk file is unchanged; a rebuilt bundle
+    // (new mtime) is re-read so a host restart isn't needed to pick it up.
     let entry = this.cache.get(full);
-    if (!entry) {
+    if (!entry || entry.mtimeMs !== mtimeMs) {
       try {
         const body = await readFile(full);
-        entry = { body, etag: `"${sha256Hex(body).slice(0, 16)}"` };
+        entry = { body, etag: `"${sha256Hex(body).slice(0, 16)}"`, mtimeMs };
         this.cache.set(full, entry);
       } catch {
         return this.send(res, 404, { error: 'not found' });

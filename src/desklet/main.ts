@@ -54,6 +54,16 @@ function fmt(v: unknown): string {
   }
 }
 
+function fmtUptime(sec: unknown): string {
+  if (typeof sec !== 'number') return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return (d ? d + 'd ' : '') + (h || d ? h + 'h ' : '') + m + 'm';
+}
+
+const gb = (mb: number): string => (mb / 1024).toFixed(1);
+
 function randomSeed(): string {
   let seed = localStorage.getItem('cr_seed');
   if (!seed) {
@@ -103,6 +113,8 @@ class DeskletClient {
   private context: Record<string, unknown> = {};
   /** correlationId -> tile element awaiting an outcome. */
   private pending = new Map<string, any>();
+  /** rolling CPU samples for the Status sparkline. */
+  private cpuHistory: number[] = [];
 
   /** freshToken: true only right after pairing — the single-use session token is
    *  valid for exactly one connect. A session loaded from storage uses the
@@ -169,8 +181,13 @@ class DeskletClient {
       const before = JSON.stringify(this.context['workspace.availableActions']);
       // Merge deltas into the running view (IFC-DCF-046: render full current context).
       Object.assign(this.context, frame.payload.deltaFields ?? {});
-      if (JSON.stringify(this.context['workspace.availableActions']) !== before) this.renderActions();
-      this.renderContext(frame.payload);
+      if (this.session.role === 'Status') {
+        this.renderStatus();
+      } else {
+        if (JSON.stringify(this.context['workspace.availableActions']) !== before) this.renderActions();
+        this.renderContext();
+      }
+      el('version').textContent = `v${frame.payload.version} · ${(frame.payload.digest ?? '').slice(0, 8)}`;
       // Stale only when the host marks the data stale (degraded). A healthy link
       // refreshes lastContext via the host pulse, so the 10s gap check won't fire.
       el('stale').style.display = frame.payload.stale ? 'flex' : 'none';
@@ -215,12 +232,79 @@ class DeskletClient {
   // --- Rendering ---------------------------------------------------------------
 
   private renderShell(): void {
-    el('role').textContent = this.session.role;
+    const role = this.session.role;
+    el('role').textContent = role;
     el('role-sub').textContent = 'desklet';
-    el('role-badge').textContent = ROLE_CODE[this.session.role] ?? '··';
+    el('role-badge').textContent = ROLE_CODE[role] ?? '··';
     el('device').textContent = this.session.deviceId;
-    el('context-title').textContent = `${this.session.role} context`;
-    this.renderActions();
+    el('context-title').textContent = `${role} context`;
+    const isActions = role === 'Actions';
+    const isStatus = role === 'Status';
+    el('actions-view').classList.toggle('hidden', !isActions);
+    el('status-view').classList.toggle('hidden', !isStatus);
+    el('context-view').classList.toggle('hidden', isStatus); // meters replace generic cards for Status
+    if (isActions) this.renderActions();
+    if (isStatus) this.renderStatus();
+  }
+
+  // --- Status: resource monitor ------------------------------------------------
+
+  private renderStatus(): void {
+    const c = this.context;
+    const cpu = typeof c['workspace.cpu'] === 'number' ? (c['workspace.cpu'] as number) : null;
+    if (cpu != null) { this.cpuHistory.push(cpu); if (this.cpuHistory.length > 48) this.cpuHistory.shift(); }
+    const mem = c['workspace.memory'] as { pct: number; usedMB: number; totalMB: number } | undefined;
+    const disk = c['workspace.disk'] as { pct: number; usedGB: number; totalGB: number } | undefined;
+
+    const meters = el('meters'); meters.innerHTML = '';
+    meters.appendChild(this.meter('CPU', cpu, cpu != null ? cpu + '%' : '—', this.sparkSvg(), ''));
+    meters.appendChild(this.meter('Memory', mem?.pct ?? null, mem ? mem.pct + '%' : '—', '', mem ? `${gb(mem.usedMB)} / ${gb(mem.totalMB)} GB` : ''));
+    meters.appendChild(this.meter('Disk', disk?.pct ?? null, disk ? disk.pct + '%' : '—', '', disk ? `${disk.usedGB} / ${disk.totalGB} GB` : 'n/a'));
+
+    const dev = c['workspace.devices'] as { live: number; paired: number } | undefined;
+    const proc = c['workspace.hostProc'] as { rssMB: number } | undefined;
+    const ro = el('readouts'); ro.innerHTML = '';
+    const rows: [string, string][] = [
+      ['uptime', fmtUptime(c['workspace.uptime'])],
+      ['load 1m', String(c['workspace.load'] ?? '—')],
+      ['cores', String(c['workspace.cores'] ?? '—')],
+      ['host rss', proc ? proc.rssMB + ' MB' : '—'],
+      ['mode', String(c['workspace.hostMode'] ?? '—')],
+      ['devices', dev ? `${dev.live} live / ${dev.paired} paired` : '—'],
+      ['platform', String(c['workspace.platform'] ?? '—')],
+      ['cpu', String(c['workspace.cpuModel'] ?? '—')],
+    ];
+    for (const [k, v] of rows) {
+      const card = document.createElement('div'); card.className = 'card';
+      const kd = document.createElement('div'); kd.className = 'k'; kd.textContent = k;
+      const vd = document.createElement('div'); vd.className = 'v'; vd.textContent = v;
+      card.append(kd, vd); ro.appendChild(card);
+    }
+  }
+
+  private meter(label: string, pct: number | null, valText: string, sparkHtml: string, sub: string): any {
+    const card = document.createElement('div'); card.className = 'card meter';
+    const p = pct == null ? 0 : pct;
+    if (p >= 90) card.classList.add('fault'); else if (p >= 70) card.classList.add('warn');
+    const head = document.createElement('div'); head.className = 'head';
+    const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.textContent = label;
+    const val = document.createElement('div'); val.className = 'val'; val.textContent = valText;
+    head.append(lbl, val);
+    const bar = document.createElement('div'); bar.className = 'track';
+    const fill = document.createElement('div'); fill.className = 'fill'; fill.style.width = p + '%';
+    bar.appendChild(fill);
+    card.append(head, bar);
+    if (sparkHtml) { const s = document.createElement('div'); s.className = 'spark'; s.innerHTML = sparkHtml; card.appendChild(s); }
+    if (sub) { const d = document.createElement('div'); d.className = 'sub'; d.textContent = sub; card.appendChild(d); }
+    return card;
+  }
+
+  private sparkSvg(): string {
+    const h = this.cpuHistory;
+    if (h.length < 2) return '';
+    const n = h.length;
+    const pts = h.map((v, i) => `${((i / (n - 1)) * 100).toFixed(2)},${(100 - v).toFixed(2)}`).join(' ');
+    return `<svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline class="area" points="0,100 ${pts} 100,100"/><polyline points="${pts}"/></svg>`;
   }
 
   private renderActions(): void {

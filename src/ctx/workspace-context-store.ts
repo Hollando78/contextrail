@@ -20,6 +20,9 @@ import { ContextObjectRegistry } from './context-object-registry.js';
 import { RoleScopeFilter } from './role-scope-filter.js';
 import { EventBusAdapter, type WorkspaceEvent } from './event-bus-adapter.js';
 import { dataPaths } from '../core/paths.js';
+import { SystemMetrics } from '../host/system-metrics.js';
+import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
+import type { LocalTransportServer } from '../xpt/local-transport-server.js';
 
 export class WorkspaceContextStore extends BaseSubsystem {
   readonly name = 'WorkspaceContextStore';
@@ -33,6 +36,7 @@ export class WorkspaceContextStore extends BaseSubsystem {
   private degraded = false;
   private pulseTimer: NodeJS.Timeout | undefined;
   private readonly startedAt = Date.now();
+  private readonly metrics = new SystemMetrics(this.config.dataDir);
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(ctx: RuntimeContext) {
@@ -70,24 +74,39 @@ export class WorkspaceContextStore extends BaseSubsystem {
     // so a healthy link keeps receiving fresh frames and the staleness indicator
     // reflects real link/host health rather than merely-unchanging data. (SUB-KWD-068)
     const pulseEvery = Math.floor(TIMING.STALENESS_INDICATOR_MS / 2);
-    this.pulseTimer = setInterval(() => this.pulse(), pulseEvery);
+    this.pulseTimer = setInterval(
+      () => void this.pulse().catch((e) => this.log.warn('pulse failed', { err: (e as Error).message })),
+      pulseEvery,
+    );
     this.pulseTimer.unref?.();
 
     this.services.set(SERVICE.ContextStore, this);
     this.log.info('workspace context store ready', { objects: this.registry.list().length, pulseMs: pulseEvery });
   }
 
-  /** Emit a lightweight host-status heartbeat visible to every role. */
-  private pulse(): void {
+  /** Host-status heartbeat + resource-monitor metrics (for the Status role). */
+  private async pulse(): Promise<void> {
     if (this.locked) return; // no context streamed while locked
+    const m = await this.metrics.sample();
+    const ledger = this.services.tryGet<DeviceIdentityLedger>(SERVICE.DeviceLedger);
+    const transport = this.services.tryGet<LocalTransportServer>(SERVICE.Transport);
+    const paired = ledger?.count() ?? 0;
+    const live = transport?.connectedDeviceIds().length ?? 0;
+
     this.ingest({
       type: 'raw',
       writes: [
-        {
-          attributePath: 'workspace.hostPulse',
-          newValue: { ts: new Date().toISOString(), uptimeSec: Math.round((Date.now() - this.startedAt) / 1000) },
-          sourceEventType: 'pulse',
-        },
+        { attributePath: 'workspace.hostPulse', newValue: { ts: new Date().toISOString(), uptimeSec: Math.round((Date.now() - this.startedAt) / 1000) }, sourceEventType: 'pulse' },
+        { attributePath: 'workspace.cpu', newValue: m.cpu, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.memory', newValue: m.memory, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.disk', newValue: m.disk, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.uptime', newValue: m.uptimeSec, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.load', newValue: m.load1, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.cores', newValue: m.cores, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.cpuModel', newValue: m.cpuModel, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.platform', newValue: m.platform, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.hostProc', newValue: { rssMB: m.procRssMB }, sourceEventType: 'metrics' },
+        { attributePath: 'workspace.devices', newValue: { live, paired }, sourceEventType: 'metrics' },
       ],
     });
   }
