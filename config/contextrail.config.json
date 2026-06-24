@@ -1,0 +1,16 @@
+{
+  "host": "0.0.0.0",
+  "port": 8787,
+  "loopbackPort": 8788,
+  "dataDir": "./data",
+  "adapterDir": "./adapters",
+  "manifestDir": "./adapters/manifests",
+  "failureCircuitThreshold": 5,
+  "ssh": {
+    "configPath": "~/.ssh/config",
+    "knownHostsPath": "~/.ssh/known_hosts"
+  },
+  "tls": {
+    "commonName": "contextrail.local"
+  }
+}

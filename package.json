@@ -1,0 +1,46 @@
+{
+  "name": "contextrail",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ContextRail — local-first host runtime that brokers role-scoped workspace context and host-mediated actions to zero-state browser desklets.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "contextrail": "dist/host/main.js",
+    "contextrail-allowlist": "dist/has/allowlist-cli.js"
+  },
+  "scripts": {
+    "build": "npm run build:desklet && tsc -p tsconfig.json",
+    "build:host": "tsc -p tsconfig.json",
+    "build:desklet": "node scripts/build-desklet.mjs",
+    "dev": "tsx watch src/host/main.ts",
+    "start": "node dist/host/main.js",
+    "host": "tsx src/host/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "node scripts/e2e-connect.mjs",
+    "pair": "node scripts/pair.mjs",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "qrcode": "^1.5.4",
+    "selfsigned": "^2.4.1",
+    "ssh2": "^1.16.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/ssh2": "^1.15.1",
+    "@types/ws": "^8.5.13",
+    "esbuild": "^0.24.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
