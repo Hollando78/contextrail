@@ -75,16 +75,30 @@ async function main() {
     challengePriority: ['dns-01'],
     challengeCreateFn: async (authz, challenge, keyAuthorization) => {
       const name = `_acme-challenge.${authz.identifier.value}`;
-      console.log('\n=== ADD THIS DNS RECORD AT YOUR REGISTRAR ===');
-      console.log(`  Type:  TXT`);
-      console.log(`  Name:  ${name}`);
-      console.log(`  Value: ${keyAuthorization}`);
-      console.log('  TTL:   60 (or lowest available)');
-      console.log('============================================');
+      // Unattended mode: if a DNS hook is configured, let it publish the TXT via
+      // your provider's API (receives <name> <value>), enabling hands-off renewal.
+      if (process.env.CERT_DNS_HOOK) {
+        console.log(`\n  running CERT_DNS_HOOK to publish ${name}…`);
+        const { spawnSync } = await import('node:child_process');
+        const r = spawnSync(process.env.CERT_DNS_HOOK, [name, keyAuthorization], { shell: true, stdio: 'inherit' });
+        if (r.status !== 0) throw new Error('CERT_DNS_HOOK failed');
+      } else {
+        console.log('\n=== ADD THIS DNS RECORD AT YOUR REGISTRAR ===');
+        console.log(`  Type:  TXT`);
+        console.log(`  Name:  ${name}`);
+        console.log(`  Value: ${keyAuthorization}`);
+        console.log('  TTL:   60 (or lowest available)');
+        console.log('============================================');
+      }
       await waitForTxt(name, keyAuthorization);
     },
-    challengeRemoveFn: async () => {
-      /* leave the record; you can delete it after issuance */
+    challengeRemoveFn: async (authz, challenge, keyAuthorization) => {
+      // Clean up the TXT via the same hook (remove mode) when one is configured.
+      if (process.env.CERT_DNS_HOOK) {
+        const name = `_acme-challenge.${authz.identifier.value}`;
+        const { spawnSync } = await import('node:child_process');
+        spawnSync(process.env.CERT_DNS_HOOK, [name, keyAuthorization, 'remove'], { shell: true, stdio: 'inherit' });
+      }
     },
   });
 

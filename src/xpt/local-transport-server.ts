@@ -11,6 +11,7 @@
  */
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
+import { watchFile, unwatchFile, readFileSync } from 'node:fs';
 import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../core/subsystem.js';
 import { SERVICE } from '../core/services.js';
 import type { Role } from '../core/constants.js';
@@ -99,6 +100,12 @@ export class LocalTransportServer extends BaseSubsystem {
     });
     this.httpsServer.on('upgrade', (req, socket, head) => this.gateway.handleUpgrade(req, socket, head));
 
+    // Hot-reload a renewed CA cert without a restart: watch the cert file and
+    // swap the server's secure context when it changes. (Makes cert renewal seamless.)
+    if (this.config.tls.certPath && this.config.tls.keyPath) {
+      this.watchCert(this.config.tls.certPath, this.config.tls.keyPath);
+    }
+
     // Loopback HTTP server: operator console (admin.html), /pair/new, /health, and
     // the Host Admin Station's /admin/* routes — all host-only.
     this.loopbackServer = createHttpServer((req, res) => {
@@ -119,8 +126,9 @@ export class LocalTransportServer extends BaseSubsystem {
     this.wireBus();
     this.services.set(SERVICE.Transport, this);
 
+    const primary = this.tls.lanAddresses[0] ?? this.config.host;
     this.log.info('local transport server listening', {
-      url: `https://${this.tls.lanAddresses[0] ?? this.config.host}:${this.config.port}`,
+      url: this.config.port === 443 ? `https://${primary}` : `https://${primary}:${this.config.port}`,
       lan: this.tls.lanAddresses,
       loopbackPort: this.config.loopbackPort,
       cert: this.tlsTrusted ? 'CA-signed (trusted)' : 'self-signed',
@@ -129,9 +137,28 @@ export class LocalTransportServer extends BaseSubsystem {
 
   override async stop(): Promise<void> {
     for (const off of this.offs.splice(0)) off();
+    if (this.watchedCertPath) unwatchFile(this.watchedCertPath);
     this.heartbeat?.stop();
     this.gateway?.closeAll();
     await Promise.all([closeServer(this.httpsServer), closeServer(this.loopbackServer)]);
+  }
+
+  private watchedCertPath: string | undefined;
+
+  /** Watch the cert file and swap the TLS secure context when it's renewed. */
+  private watchCert(certPath: string, keyPath: string): void {
+    this.watchedCertPath = certPath;
+    watchFile(certPath, { interval: 60_000 }, () => {
+      try {
+        const cert = readFileSync(certPath, 'utf8');
+        const key = readFileSync(keyPath, 'utf8');
+        this.httpsServer.setSecureContext({ cert, key });
+        this.tls = { ...this.tls, cert, key };
+        this.log.info('TLS certificate reloaded (renewed)');
+      } catch (err) {
+        this.log.warn('cert reload failed', { err: (err as Error).message });
+      }
+    });
   }
 
   /** Device ids with a currently-open WebSocket connection. */

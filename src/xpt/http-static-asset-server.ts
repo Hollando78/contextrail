@@ -94,7 +94,9 @@ export class HttpStaticAssetServer {
     const addr = requested && candidates.includes(requested) ? requested : (candidates[0] ?? '127.0.0.1');
 
     const { ott, expiresAt } = this.pairing.newPairing(role);
-    const pairUrl = `https://${addr}:${this.port}/?ott=${encodeURIComponent(ott)}&role=${role}`;
+    // Omit the port for 443 so the URL reads as a plain https://host.
+    const hostPart = this.port === 443 ? addr : `${addr}:${this.port}`;
+    const pairUrl = `https://${hostPart}/?ott=${encodeURIComponent(ott)}&role=${role}`;
     const qr = await QRCode.toDataURL(pairUrl, { margin: 1, width: 320 });
     this.send(res, 200, { ott, url: pairUrl, qr, role, expiresAt, addr, addresses: candidates });
   }

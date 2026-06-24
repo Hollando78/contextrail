@@ -11,6 +11,9 @@ certs/
 *.key
 # Operator-local config (domain, cert paths, etc.) — keep the committed sample generic
 config/local.config.json
+# Secrets / env (e.g. Cloudflare API token for DNS-01)
+*.env
+.env
 src/host/public/desklet.js
 src/host/public/desklet.js.map
 coverage/

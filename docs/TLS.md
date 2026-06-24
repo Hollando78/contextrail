@@ -76,9 +76,35 @@ Use a static DHCP lease (or local DNS) so the host IP doesn't move.
 
 ### Renewal
 
-Let's Encrypt certs last ~90 days. Schedule the ACME renew + re-install on the
-host (cron / Task Scheduler) and restart the host (or it'll pick up the new files
-on next start). The cert is reloaded at startup.
+Let's Encrypt certs last ~90 days. `npm run cert:renew` renews only when <30 days
+remain, and the host **hot-reloads** the new cert with no restart (it watches the
+cert file). Schedule it weekly, e.g. Windows Task Scheduler:
+
+```powershell
+schtasks /create /tn "ContextRail cert renew" ^
+  /tr "cmd /c cd /d C:\path\to\ContextRail && node scripts\renew-cert.mjs >> data\renew.log 2>&1" ^
+  /sc WEEKLY /d SUN /st 03:00 /f
+```
+
+#### Fully hands-off renewal (Cloudflare)
+
+If your DNS is on Cloudflare, the included hook publishes/cleans the
+`_acme-challenge` TXT automatically — no manual record entry:
+
+1. Create a Cloudflare API token with **Zone → DNS → Edit** on your domain.
+2. Provide it to the renewal process via env (keep it out of the repo — e.g. a
+   git-ignored `certs/cf.env`):
+   ```
+   CLOUDFLARE_API_TOKEN=your-token
+   CERT_DNS_HOOK=node scripts/cf-dns-hook.mjs
+   ```
+3. Run `npm run cert` (first issue) or `npm run cert:renew` with those env vars set;
+   the hook creates the TXT, the issuer waits for it to go live, finalizes, then the
+   hook deletes it. Other providers: point `CERT_DNS_HOOK` at any script taking
+   `<recordName> <value> [add|remove]`.
+
+> **Cloudflare A record:** the `context-rail.com → <LAN IP>` A record must be
+> **DNS only (grey cloud)**, not proxied — Cloudflare can't proxy to a private IP.
 
 ---
 

@@ -24,6 +24,7 @@
     "e2e": "node scripts/e2e-connect.mjs",
     "pair": "node scripts/pair.mjs",
     "cert": "node scripts/get-cert.mjs",
+    "cert:renew": "node scripts/renew-cert.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
