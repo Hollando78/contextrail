@@ -45,6 +45,59 @@ describe('ActionsRegistry', () => {
   });
 });
 
+describe('ActionsRegistry editing + persistence', () => {
+  it('upserts a new action, deriving a unique id from the label', async () => {
+    const r = registryWith([{ id: 'a', label: 'A', kind: 'url', target: 'https://x' }]);
+    const def = await r.upsert({ label: 'Open Docs', kind: 'url', target: 'https://docs' });
+    expect(def.id).toBe('open-docs');
+    expect(r.get('open-docs')?.target).toBe('https://docs');
+    // a second action with the same label gets a distinct id
+    const def2 = await r.upsert({ label: 'Open Docs', kind: 'url', target: 'https://docs2' });
+    expect(def2.id).toBe('open-docs-2');
+  });
+
+  it('updates an existing action in place and persists to actions.local.json', async () => {
+    const r = registryWith([{ id: 'a', label: 'A', kind: 'app', target: 'notepad' }]);
+    await r.upsert({ id: 'a', label: 'A renamed', kind: 'app', target: 'code' });
+    expect(r.list()).toHaveLength(1);
+    expect(r.get('a')?.label).toBe('A renamed');
+    expect(r.get('a')?.target).toBe('code');
+  });
+
+  it('rejects an action missing its required target', async () => {
+    const r = registryWith([]);
+    await expect(r.upsert({ label: 'Bad', kind: 'url' })).rejects.toThrow(/target/);
+  });
+
+  it('removes an action by id', async () => {
+    const r = registryWith([{ id: 'a', label: 'A', kind: 'app', target: 'notepad' }]);
+    expect(await r.remove('a')).toBe(true);
+    expect(await r.remove('a')).toBe(false);
+    expect(r.list()).toHaveLength(0);
+  });
+});
+
+describe('ActionsRegistry proposals (desklet → operator approval)', () => {
+  it('queues a proposal without activating it, then approves it', async () => {
+    const r = registryWith([]);
+    const p = r.propose({ label: 'From Phone', kind: 'url', target: 'https://p' }, 'dev-1');
+    expect(r.proposals()).toHaveLength(1);
+    expect(r.list()).toHaveLength(0); // not active until approved
+    const def = await r.approveProposal(p.proposalId);
+    expect(def?.id).toBe('from-phone');
+    expect(r.list()).toHaveLength(1);
+    expect(r.proposals()).toHaveLength(0);
+  });
+
+  it('rejects a proposal without activating it', async () => {
+    const r = registryWith([]);
+    const p = r.propose({ label: 'Nope', kind: 'app', target: 'x' }, 'dev-1');
+    expect(r.rejectProposal(p.proposalId)).toBe(true);
+    expect(r.proposals()).toHaveLength(0);
+    expect(r.list()).toHaveLength(0);
+  });
+});
+
 describe('resolveIntent with action registry', () => {
   const r = registryWith([
     { id: 'open-x', label: 'Open X', kind: 'url', target: 'https://x' },

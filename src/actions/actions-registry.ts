@@ -8,7 +8,7 @@
  * dispatched action id against this registry. Operators customise actions by
  * editing the file — no code changes.
  */
-import { readFileSync, existsSync, watchFile, unwatchFile } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile } from 'node:fs';
 import type { Logger } from '../core/logger.js';
 
 export type ActionKind = 'app' | 'url' | 'script' | 'ssh';
@@ -44,10 +44,28 @@ export interface ActionView {
   group?: string;
 }
 
+/** A desklet-originated action awaiting operator approval on the host console. */
+export interface ActionProposal {
+  proposalId: string;
+  def: ActionDef;
+  /** deviceId of the proposing desklet. */
+  by: string;
+  at: string;
+}
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'action';
+}
+
 export class ActionsRegistry {
   private defs: ActionDef[] = [];
   private listeners: Array<() => void> = [];
-  private watched: string | undefined;
+  private watched: string[] = [];
+  /** In-memory queue of desklet proposals awaiting operator approval. */
+  private pending: ActionProposal[] = [];
+  private proposalSeq = 0;
+  /** Set while we write actions.local.json so our own watch-fire is ignored. */
+  private selfWriting = false;
 
   constructor(
     private readonly committedPath: string,
@@ -71,14 +89,16 @@ export class ActionsRegistry {
     }
   }
 
-  /** Watch the active file and reload + notify listeners on change. */
+  /** Watch both config files and reload + notify listeners on external change. */
   watch(): void {
-    const path = this.activePath();
-    this.watched = path;
-    watchFile(path, { interval: 2_000 }, () => {
-      this.load();
-      for (const cb of this.listeners) cb();
-    });
+    this.watched = [this.committedPath, this.localPath];
+    for (const path of this.watched) {
+      watchFile(path, { interval: 2_000 }, () => {
+        if (this.selfWriting) return; // ignore our own save() writes
+        this.load();
+        for (const cb of this.listeners) cb();
+      });
+    }
   }
 
   onChange(cb: () => void): void {
@@ -86,11 +106,131 @@ export class ActionsRegistry {
   }
 
   stop(): void {
-    if (this.watched) unwatchFile(this.watched);
+    for (const path of this.watched) unwatchFile(path);
   }
 
   list(): ActionDef[] {
     return this.defs.map((a) => ({ ...a }));
+  }
+
+  // --- Editing (operator console + approved proposals) -------------------------
+
+  /**
+   * Validate and normalise a (partial) action definition. Derives a unique id
+   * from the label when none is supplied; enforces the per-kind required fields.
+   */
+  private normalise(input: Partial<ActionDef>, takenIds: Set<string>): ActionDef {
+    const kind = input.kind;
+    if (kind !== 'app' && kind !== 'url' && kind !== 'script' && kind !== 'ssh') {
+      throw new Error('kind must be app, url, script, or ssh');
+    }
+    const label = String(input.label ?? '').trim();
+    if (!label) throw new Error('label is required');
+
+    let id = String(input.id ?? '').trim().toLowerCase();
+    if (id && !/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new Error('id must be lowercase letters, digits, and dashes');
+    if (!id) {
+      const base = slugify(label);
+      id = base;
+      let n = 2;
+      while (takenIds.has(id)) id = `${base}-${n++}`;
+    }
+
+    const def: ActionDef = { id, label, kind };
+    if (input.icon) def.icon = String(input.icon).slice(0, 32);
+    if (input.group) def.group = String(input.group).slice(0, 48);
+
+    if (kind === 'app' || kind === 'url' || kind === 'script') {
+      const target = String(input.target ?? '').trim();
+      if (!target) throw new Error(`${kind} action requires a target`);
+      def.target = target;
+      if (kind === 'script' && Array.isArray(input.args)) def.args = input.args.map((a) => String(a));
+    }
+    if (kind === 'ssh') {
+      const command = String(input.command ?? '').trim();
+      const host = String(input.host ?? '').trim();
+      if (!command) throw new Error('ssh action requires a command');
+      if (!host) throw new Error('ssh action requires a host');
+      def.command = command;
+      def.host = host;
+      def.commandClass = input.commandClass === 'streaming' ? 'streaming' : 'bounded';
+    }
+    return def;
+  }
+
+  /** Add or update an action and persist it to actions.local.json. */
+  async upsert(input: Partial<ActionDef>): Promise<ActionDef> {
+    const requestedId = String(input.id ?? '').trim().toLowerCase();
+    const taken = new Set(this.defs.map((d) => d.id).filter((existing) => existing !== requestedId));
+    const def = this.normalise(input, taken);
+    const next = this.defs.some((d) => d.id === def.id)
+      ? this.defs.map((d) => (d.id === def.id ? def : d))
+      : [...this.defs, def];
+    await this.save(next);
+    return def;
+  }
+
+  /** Remove an action by id. Returns false if it didn't exist. */
+  async remove(id: string): Promise<boolean> {
+    const next = this.defs.filter((d) => d.id !== id);
+    if (next.length === this.defs.length) return false;
+    await this.save(next);
+    return true;
+  }
+
+  /** Replace the whole set (validated) and persist. */
+  async save(defs: ActionDef[]): Promise<void> {
+    const taken = new Set<string>();
+    const validated = defs.map((d) => {
+      const norm = this.normalise(d, taken);
+      taken.add(norm.id);
+      return norm;
+    });
+    this.selfWriting = true;
+    try {
+      writeFileSync(this.localPath, JSON.stringify(validated, null, 2) + '\n', 'utf8');
+    } finally {
+      // Release after the watch poll window so the self-write isn't re-ingested.
+      setTimeout(() => { this.selfWriting = false; }, 2_500).unref?.();
+    }
+    this.defs = validated;
+    this.log.info('actions saved', { count: validated.length, path: this.localPath });
+    for (const cb of this.listeners) cb();
+  }
+
+  // --- Proposals (desklet → operator approval) --------------------------------
+
+  /** Queue a desklet-proposed action for operator approval. */
+  propose(input: Partial<ActionDef>, by: string): ActionProposal {
+    const def = this.normalise(input, new Set(this.defs.map((d) => d.id)));
+    const proposal: ActionProposal = {
+      proposalId: `prop-${++this.proposalSeq}-${Date.now().toString(36)}`,
+      def,
+      by,
+      at: new Date().toISOString(),
+    };
+    this.pending.push(proposal);
+    if (this.pending.length > 50) this.pending.shift();
+    this.log.info('action proposed (awaiting approval)', { id: def.id, by });
+    return proposal;
+  }
+
+  proposals(): ActionProposal[] {
+    return this.pending.map((p) => ({ ...p }));
+  }
+
+  /** Approve a proposal: promote it to a live action and clear it. */
+  async approveProposal(proposalId: string): Promise<ActionDef | null> {
+    const p = this.pending.find((x) => x.proposalId === proposalId);
+    if (!p) return null;
+    this.pending = this.pending.filter((x) => x.proposalId !== proposalId);
+    return this.upsert(p.def);
+  }
+
+  rejectProposal(proposalId: string): boolean {
+    const before = this.pending.length;
+    this.pending = this.pending.filter((x) => x.proposalId !== proposalId);
+    return this.pending.length < before;
   }
 
   /** Desklet-safe projection — labels/icons only, no host targets. */

@@ -320,6 +320,33 @@ class DeskletClient {
     if (capIn) capIn.onkeydown = (e: any) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.sendCapture(); };
     const aiIn = el('ai-input');
     if (aiIn) aiIn.onkeydown = (e: any) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.sendAi(); };
+    const pfToggle = el('pf-toggle');
+    if (pfToggle) pfToggle.onclick = () => { const f = el('propose-form'); if (f) f.classList.toggle('hidden'); };
+    const pfSend = el('pf-send');
+    if (pfSend) pfSend.onclick = () => this.sendPropose();
+  }
+
+  /** Propose a new action (Actions role) for operator approval on the host. */
+  private sendPropose(): void {
+    const hint = el('pf-hint');
+    const label = (el('pf-label')?.value ?? '').trim();
+    const kind = el('pf-kind')?.value ?? 'app';
+    const target = (el('pf-target')?.value ?? '').trim();
+    if (!label || !target) { if (hint) hint.textContent = 'label and target are required'; return; }
+    if (!this.ws || this.ws.readyState !== 1) { if (hint) hint.textContent = 'not connected'; return; }
+    const correlationId = this.cid();
+    this.pending.set(correlationId, (ok, status) => {
+      if (!hint) return;
+      if (ok) {
+        el('pf-label').value = ''; el('pf-target').value = '';
+        el('propose-form').classList.add('hidden');
+        hint.textContent = 'proposed — awaiting operator approval';
+      } else {
+        hint.textContent = status === 'DENIED' ? 'not permitted for this role' : 'proposal rejected';
+      }
+    });
+    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'action-propose', data: { label, kind, target } } }));
+    if (hint) hint.textContent = 'sending…';
   }
 
   /** Render the active role's view from current context. */

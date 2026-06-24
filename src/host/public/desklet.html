@@ -49,6 +49,14 @@
       .tile[data-st="bad"] { border-color: var(--fault); } .tile[data-st="bad"] .state { color: var(--fault); } .tile[data-st="bad"] .state::before { content: "✕"; font-weight: 800; }
       .empty { color: var(--muted-2); font: 400 13.5px/1.5 var(--font-sans); padding: 6px 2px; }
 
+      /* Actions — propose form */
+      .sec-head { display: flex; align-items: center; justify-content: space-between; }
+      .pf-grid { display: grid; gap: 9px; }
+      .pf-grid input, .pf-grid select { width: 100%; background: var(--ink-2); color: var(--text);
+        border: 1px solid var(--rail-2); border-radius: var(--r-ctl); padding: 11px 12px; font: 500 14px var(--font-sans); }
+      .pf-grid input::placeholder { color: var(--muted-2); }
+      #propose-form { margin-top: 14px; }
+
       /* Resource-monitor meters */
       .meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 13px; }
       .meter { padding: 16px 17px; }
@@ -154,8 +162,23 @@
       <div class="stale" id="stale">Context is stale — host is in a degraded state.</div>
 
       <section id="actions-view" class="hidden">
-        <div class="eyebrow sec">Actions</div>
+        <div class="sec-head">
+          <div class="eyebrow sec">Actions</div>
+          <button class="chip" id="pf-toggle">Propose action</button>
+        </div>
         <div class="grid" id="tiles"></div>
+        <div id="propose-form" class="composer hidden">
+          <div class="pf-grid">
+            <input id="pf-label" autocomplete="off" placeholder="Label — e.g. Open Dashboard" />
+            <select id="pf-kind">
+              <option value="app">app — launch a program</option>
+              <option value="url">url — open a link</option>
+              <option value="script">script — run an executable</option>
+            </select>
+            <input id="pf-target" autocomplete="off" placeholder="Target — app name, URL, or script path" />
+          </div>
+          <div class="composer-row"><span class="hint" id="pf-hint">needs operator approval on the host</span><button class="btn" id="pf-send">Propose</button></div>
+        </div>
       </section>
 
       <section id="status-view" class="hidden">
@@ -218,6 +241,6 @@
       <span id="version">—</span>
     </footer>
 
-    <script src="/desklet.js?v=10"></script>
+    <script src="/desklet.js?v=11"></script>
   </body>
 </html>

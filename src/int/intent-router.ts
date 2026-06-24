@@ -29,18 +29,20 @@ export class IntentRouter extends BaseSubsystem {
   override async start(): Promise<void> {
     const policy = this.services.get<PolicyEngine>(SERVICE.PolicyEngine);
     const ctxStore = this.services.tryGet<WorkspaceContextStore>(SERVICE.ContextStore);
+    const actionsRegistry = this.services.tryGet<ActionsRegistry>(SERVICE.Actions);
     this.dispatcher = new IntentDispatcher(
       this.bus,
       {
         policy,
-        actions: this.services.tryGet<ActionsRegistry>(SERVICE.Actions),
+        actions: actionsRegistry,
         executorFor: (adapterId) => {
           if (adapterId === 'rag') return this.services.tryGet<CommandExecutor>(SERVICE.RemoteGateway);
           if (adapterId && adapterId !== 'local') return this.services.tryGet<CommandExecutor>(SERVICE.AdapterFramework);
           return this.services.tryGet<CommandExecutor>(SERVICE.Executor);
         },
-        // Data intents (Capture notes, AI queries) are role-scoped, default-deny.
-        dataHandlers: buildDataHandlers(ctxStore),
+        // Data intents (Capture notes, AI queries, action proposals) are
+        // role-scoped, default-deny.
+        dataHandlers: buildDataHandlers(ctxStore, actionsRegistry),
       },
       this.log.child('dispatch'),
       this.config.failureCircuitThreshold,

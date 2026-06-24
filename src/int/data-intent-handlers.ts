@@ -14,8 +14,30 @@ export interface CaptureAndAssistant {
   runAssistant(query: string): unknown;
 }
 
-export function buildDataHandlers(store: CaptureAndAssistant | undefined): Record<string, DataIntentHandler> {
+/** The Actions Registry surface the propose handler needs. */
+export interface ActionProposer {
+  propose(input: Record<string, unknown>, by: string): { proposalId: string };
+}
+
+export function buildDataHandlers(
+  store: CaptureAndAssistant | undefined,
+  actions?: ActionProposer | undefined,
+): Record<string, DataIntentHandler> {
   return {
+    // An Actions desklet may PROPOSE an action; it never activates until the
+    // operator approves it on the host console. SSH actions are operator-only.
+    'action-propose': async (intent) => {
+      if (intent.role !== 'Actions') return { status: 'DENIED', detail: { reason: 'PERMISSION_DENIED' } };
+      if (!actions) return { status: 'FAILURE', detail: { reason: 'INTERNAL_ERROR' } };
+      const p = intent.payload as Record<string, unknown>;
+      if (p['kind'] === 'ssh') return { status: 'DENIED', detail: { reason: 'SSH_ACTIONS_ARE_OPERATOR_ONLY' } };
+      try {
+        const proposal = actions.propose(p, intent.deskletId);
+        return { status: 'SUCCESS', detail: { proposalId: proposal.proposalId } };
+      } catch (err) {
+        return { status: 'FAILURE', detail: { reason: (err as Error).message } };
+      }
+    },
     capture: async (intent) => {
       if (intent.role !== 'Capture') return { status: 'DENIED', detail: { reason: 'PERMISSION_DENIED' } };
       if (!store) return { status: 'FAILURE', detail: { reason: 'INTERNAL_ERROR' } };

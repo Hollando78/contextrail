@@ -48,20 +48,20 @@ describe('Data intents are role-scoped (FN-FN-010, default-deny)', () => {
     receiptTimestamp: new Date().toISOString(),
   });
 
-  function dispatcherWith(store: { addCapture: (t: string) => void; runAssistant: (q: string) => void }) {
+  function dispatcherWith(store: { addCapture: (t: string) => void; runAssistant: (q: string) => void }, actions?: any) {
     const bus = new EventBus();
     const policy = { evaluate: () => ({ decision: 'ALLOW', permitId: 'p' }) } as never;
     const dispatcher = new IntentDispatcher(
       bus,
-      { policy, executorFor: () => undefined, dataHandlers: buildDataHandlers(store) },
+      { policy, executorFor: () => undefined, dataHandlers: buildDataHandlers(store, actions) },
       log,
       5,
     );
     return { bus, dispatcher };
   }
 
-  async function outcomeOf(type: string, role: Role, payload: Record<string, unknown>, store: any) {
-    const { bus, dispatcher } = dispatcherWith(store);
+  async function outcomeOf(type: string, role: Role, payload: Record<string, unknown>, store: any, actions?: any) {
+    const { bus, dispatcher } = dispatcherWith(store, actions);
     let status = '';
     bus.on('intent:outcome', (o) => { status = o.status; });
     await dispatcher.handle(mkIntent(type, role, payload));
@@ -96,5 +96,17 @@ describe('Data intents are role-scoped (FN-FN-010, default-deny)', () => {
     expect(asked).toEqual(['status']);
     expect(await outcomeOf('ai-query', 'Capture', { query: 'status' }, store)).toBe('DENIED');
     expect(asked).toHaveLength(1);
+  });
+
+  it('lets an Actions desklet propose an action, but not an SSH one', async () => {
+    const proposed: any[] = [];
+    const store = { addCapture: () => {}, runAssistant: () => {} };
+    const actions = { propose: (input: any) => { proposed.push(input); return { proposalId: 'p1' }; } };
+    expect(await outcomeOf('action-propose', 'Actions', { label: 'X', kind: 'url', target: 'https://x' }, store, actions)).toBe('SUCCESS');
+    expect(proposed).toHaveLength(1);
+    // wrong role and ssh kind are both denied, and neither is queued
+    expect(await outcomeOf('action-propose', 'Status', { label: 'X', kind: 'url', target: 'https://x' }, store, actions)).toBe('DENIED');
+    expect(await outcomeOf('action-propose', 'Actions', { label: 'X', kind: 'ssh', command: 'deploy', host: 'p' }, store, actions)).toBe('DENIED');
+    expect(proposed).toHaveLength(1);
   });
 });

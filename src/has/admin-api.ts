@@ -15,6 +15,7 @@ import type { LockStateController } from '../slm/lock-state-controller.js';
 import type { HostAuthenticator } from '../slm/host-authenticator.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import type { RoleAssignmentManager } from '../pair/role-assignment-manager.js';
+import type { ActionsRegistry, ActionDef } from '../actions/actions-registry.js';
 import { isContextRailError } from '../core/errors.js';
 import { isRole, ROLES, type Role } from '../core/constants.js';
 import { dataPaths } from '../core/paths.js';
@@ -40,6 +41,7 @@ export interface AdminDeps {
   roles: RoleAssignmentManager;
   transport: DeviceControl;
   context: SubscriberControl;
+  actions: ActionsRegistry;
   dataDir: string;
   log: Logger;
 }
@@ -57,6 +59,8 @@ export class HostAdminApi implements AdminApi {
       if (req.method === 'POST' && url.pathname === '/admin/lock') return await this.lock(req, res);
       if (req.method === 'POST' && url.pathname === '/admin/unlock') return await this.unlock(req, res);
       if (req.method === 'POST' && url.pathname === '/admin/device') return await this.device(req, res);
+      if (req.method === 'GET' && url.pathname === '/admin/actions') return this.listActions(res);
+      if (req.method === 'POST' && url.pathname === '/admin/actions') return await this.actions(req, res);
       this.send(res, 404, { error: 'unknown admin route' });
     } catch (err) {
       if (isContextRailError(err)) return this.send(res, 409, err.toJSON());
@@ -106,6 +110,48 @@ export class HostAdminApi implements AdminApi {
       return this.send(res, 200, { ok: true, role: b.role });
     }
     return this.send(res, 400, { error: 'op must be forget|switch-role' });
+  }
+
+  /** Current action set + pending desklet proposals (loopback / operator only). */
+  private listActions(res: ServerResponse): void {
+    this.send(res, 200, { actions: this.deps.actions.list(), proposals: this.deps.actions.proposals() });
+  }
+
+  /**
+   * Action editing (host-only): upsert/remove a definition, or approve/reject a
+   * desklet proposal. New local actions match the seeded `action:*` allow rule,
+   * so they are runnable once saved — the operator review IS the gate.
+   */
+  private async actions(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const b = (await body(req)) as {
+      op?: 'upsert' | 'remove' | 'approve' | 'reject';
+      action?: Partial<ActionDef>;
+      id?: string;
+      proposalId?: string;
+    };
+    try {
+      switch (b.op) {
+        case 'upsert': {
+          const def = await this.deps.actions.upsert(b.action ?? {});
+          return this.send(res, 200, { ok: true, action: def });
+        }
+        case 'remove':
+          if (!b.id) return this.send(res, 400, { error: 'id required' });
+          return this.send(res, 200, { removed: await this.deps.actions.remove(b.id) });
+        case 'approve': {
+          if (!b.proposalId) return this.send(res, 400, { error: 'proposalId required' });
+          const def = await this.deps.actions.approveProposal(b.proposalId);
+          return def ? this.send(res, 200, { ok: true, action: def }) : this.send(res, 404, { error: 'unknown proposal' });
+        }
+        case 'reject':
+          if (!b.proposalId) return this.send(res, 400, { error: 'proposalId required' });
+          return this.send(res, 200, { rejected: this.deps.actions.rejectProposal(b.proposalId) });
+        default:
+          return this.send(res, 400, { error: 'op must be upsert|remove|approve|reject' });
+      }
+    } catch (err) {
+      return this.send(res, 400, { error: (err as Error).message });
+    }
   }
 
   private async maintenance(req: IncomingMessage, res: ServerResponse): Promise<void> {

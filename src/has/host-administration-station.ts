@@ -13,6 +13,7 @@ import type { LockStateController } from '../slm/lock-state-controller.js';
 import type { HostAuthenticator } from '../slm/host-authenticator.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import type { RoleAssignmentManager } from '../pair/role-assignment-manager.js';
+import type { ActionsRegistry } from '../actions/actions-registry.js';
 import { HostAdminApi, type DeviceControl, type SubscriberControl } from './admin-api.js';
 
 export class HostAdministrationStation extends BaseSubsystem {
@@ -33,6 +34,7 @@ export class HostAdministrationStation extends BaseSubsystem {
       roles: this.services.get<RoleAssignmentManager>(SERVICE.RoleAssignment),
       transport: this.services.get<DeviceControl>(SERVICE.Transport),
       context: this.services.get<SubscriberControl>(SERVICE.ContextStore),
+      actions: this.services.get<ActionsRegistry>(SERVICE.Actions),
       dataDir: this.config.dataDir,
       log: this.log.child('api'),
     });
