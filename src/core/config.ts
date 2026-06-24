@@ -43,6 +43,21 @@ export interface HostConfig {
      * that behaviour (at the cost of breaking silent reconnect across restarts).
      */
     persist?: boolean;
+    /**
+     * Bring-your-own CA-signed cert: absolute/relative paths to a PEM certificate
+     * (full chain) and private key. When both are present and readable they are
+     * used as-is — letting an operator with a domain (Let's Encrypt) or local CA
+     * serve a browser-trusted cert. Falls back to self-signed when unset/missing.
+     * Never commit a private key. See docs/TLS.md.
+     */
+    certPath?: string;
+    keyPath?: string;
+    /**
+     * Public hostname the cert is issued for (e.g. "context-rail.com"). When set,
+     * it's preferred in pairing URLs and added to the self-signed SAN, so desklets
+     * connect by name and match a real cert.
+     */
+    publicHost?: string;
   };
 }
 
@@ -75,6 +90,9 @@ export const CONFIG_SCHEMA = {
       properties: {
         commonName: { type: 'string', minLength: 1 },
         persist: { type: 'boolean', default: true },
+        certPath: { type: 'string' },
+        keyPath: { type: 'string' },
+        publicHost: { type: 'string' },
       },
     },
   },

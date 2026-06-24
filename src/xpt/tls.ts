@@ -53,7 +53,12 @@ export function lanIPv4Addresses(): string[] {
  * re-accepting a new certificate. (Trades off SUB-XPT-039's per-restart rotation
  * for cross-restart reconnect; gated by config `tls.persist`.)
  */
-export function loadOrCreateTls(commonName: string, dataDir: string, persist: boolean): TlsMaterial {
+export function loadOrCreateTls(
+  commonName: string,
+  dataDir: string,
+  persist: boolean,
+  extraDns: string[] = [],
+): TlsMaterial {
   const lan = lanIPv4Addresses();
   const certPath = join(dataDir, 'tls-cert.pem');
   const keyPath = join(dataDir, 'tls-key.pem');
@@ -63,14 +68,14 @@ export function loadOrCreateTls(commonName: string, dataDir: string, persist: bo
       const cert = readFileSync(certPath, 'utf8');
       const key = readFileSync(keyPath, 'utf8');
       const san = new X509Certificate(cert).subjectAltName ?? '';
-      const covered = ['127.0.0.1', ...lan].every((ip) => san.includes(ip));
+      const covered = ['127.0.0.1', ...lan, ...extraDns].every((name) => san.includes(name));
       if (covered) return { key, cert, lanAddresses: lan };
     } catch {
       /* fall through to regenerate */
     }
   }
 
-  const fresh = generateSelfSigned(commonName);
+  const fresh = generateSelfSigned(commonName, extraDns);
   if (persist) {
     try {
       writeFileSync(certPath, fresh.cert);
@@ -82,11 +87,12 @@ export function loadOrCreateTls(commonName: string, dataDir: string, persist: bo
   return fresh;
 }
 
-export function generateSelfSigned(commonName: string): TlsMaterial {
+export function generateSelfSigned(commonName: string, extraDns: string[] = []): TlsMaterial {
   const lan = lanIPv4Addresses();
   const altNames = [
     { type: 2, value: 'localhost' },
     { type: 2, value: commonName },
+    ...extraDns.map((d) => ({ type: 2, value: d })),
     { type: 7, ip: '127.0.0.1' },
     ...lan.map((ip) => ({ type: 7, ip })),
   ];
@@ -97,4 +103,35 @@ export function generateSelfSigned(commonName: string): TlsMaterial {
     extensions: [{ name: 'subjectAltName', altNames }],
   });
   return { key: pems.private, cert: pems.cert, lanAddresses: lan };
+}
+
+export interface TlsOptions {
+  commonName: string;
+  dataDir: string;
+  persist: boolean;
+  /** Optional CA-signed cert/key (bring-your-own); used when both exist. */
+  certPath?: string | undefined;
+  keyPath?: string | undefined;
+  /** Public hostname to prefer in pairing URLs and include in the self-signed SAN. */
+  publicHost?: string | undefined;
+}
+
+/**
+ * Resolve the TLS material for the transport. Prefers an operator-supplied
+ * CA-signed cert (browser-trusted, no warning) when `certPath`/`keyPath` are
+ * configured and readable; otherwise generates/persists a self-signed cert.
+ * The returned `lanAddresses` lists the addresses a desklet can use, with the
+ * public hostname first when configured (so pairing URLs prefer the trusted name).
+ */
+export function resolveTls(opts: TlsOptions): { material: TlsMaterial; trusted: boolean } {
+  const extra = opts.publicHost ? [opts.publicHost] : [];
+
+  if (opts.certPath && opts.keyPath && existsSync(opts.certPath) && existsSync(opts.keyPath)) {
+    const cert = readFileSync(opts.certPath, 'utf8');
+    const key = readFileSync(opts.keyPath, 'utf8');
+    return { material: { key, cert, lanAddresses: [...extra, ...lanIPv4Addresses()] }, trusted: true };
+  }
+
+  const m = loadOrCreateTls(opts.commonName, opts.dataDir, opts.persist, extra);
+  return { material: { ...m, lanAddresses: [...extra, ...m.lanAddresses] }, trusted: false };
 }

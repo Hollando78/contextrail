@@ -15,7 +15,7 @@ import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../cor
 import { SERVICE } from '../core/services.js';
 import type { Role } from '../core/constants.js';
 import type { RoleProjection } from '../core/types.js';
-import { loadOrCreateTls, type TlsMaterial } from './tls.js';
+import { resolveTls, type TlsMaterial } from './tls.js';
 import { ConnectionRegistry } from './connection-registry.js';
 import { ChannelMultiplexer } from './channel-multiplexer.js';
 import { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
@@ -32,6 +32,7 @@ export class LocalTransportServer extends BaseSubsystem {
   readonly name = 'LocalTransportServer';
 
   private tls!: TlsMaterial;
+  private tlsTrusted = false;
   private httpsServer!: HttpsServer;
   private loopbackServer!: HttpServer;
   private registry!: ConnectionRegistry;
@@ -56,7 +57,16 @@ export class LocalTransportServer extends BaseSubsystem {
     const ctx = this.services.get<WorkspaceContextStore>(SERVICE.ContextStore);
     const pairing = this.services.get<DeskletPairingAndIdentity>(SERVICE.Pairing);
 
-    this.tls = loadOrCreateTls(this.config.tls.commonName, this.dataDir, this.config.tls.persist !== false);
+    const tls = resolveTls({
+      commonName: this.config.tls.commonName,
+      dataDir: this.dataDir,
+      persist: this.config.tls.persist !== false,
+      certPath: this.config.tls.certPath,
+      keyPath: this.config.tls.keyPath,
+      publicHost: this.config.tls.publicHost,
+    });
+    this.tls = tls.material;
+    this.tlsTrusted = tls.trusted;
     this.registry = new ConnectionRegistry();
     this.mux = new ChannelMultiplexer(this.registry, guard, this.log.child('mux'));
     this.heartbeat = new TransportHeartbeatMonitor(this.registry, ledger, this.log.child('hbm'), (id) =>
@@ -113,6 +123,7 @@ export class LocalTransportServer extends BaseSubsystem {
       url: `https://${this.tls.lanAddresses[0] ?? this.config.host}:${this.config.port}`,
       lan: this.tls.lanAddresses,
       loopbackPort: this.config.loopbackPort,
+      cert: this.tlsTrusted ? 'CA-signed (trusted)' : 'self-signed',
     });
   }
 

@@ -49,6 +49,11 @@ no PKI). Roles: `Project, Actions, Status, Capture, Logs, AI`.
 > 8787 through the host firewall, or connect over Tailscale (the console offers a
 > host-address picker).
 
+The link is always TLS-encrypted; the default self-signed cert shows a one-time
+browser warning. To remove it (e.g. for guests' devices) — bring your own
+CA-signed cert via `tls.certPath`/`keyPath`, or use a local CA / Tailscale. See
+**[docs/TLS.md](docs/TLS.md)**.
+
 CLI alternative: `npm run pair -- Status` prints a QR/URL in the terminal.
 
 ### Operate (Host Administration Station)

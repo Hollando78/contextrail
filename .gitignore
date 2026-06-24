@@ -5,6 +5,12 @@ dist/
 # Runtime state (pairing ledger, allowlist, audit logs, generated certs)
 data/
 !data/.gitkeep
+# TLS material — never commit private keys / certs
+certs/
+*.pem
+*.key
+# Operator-local config (domain, cert paths, etc.) — keep the committed sample generic
+config/local.config.json
 src/host/public/desklet.js
 src/host/public/desklet.js.map
 coverage/

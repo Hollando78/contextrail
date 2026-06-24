@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "e2e": "node scripts/e2e-connect.mjs",
     "pair": "node scripts/pair.mjs",
+    "cert": "node scripts/get-cert.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "@types/qrcode": "^1.5.5",
     "@types/ssh2": "^1.15.1",
     "@types/ws": "^8.5.13",
+    "acme-client": "^5.4.0",
     "esbuild": "^0.24.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
