@@ -29,6 +29,21 @@ interface Session {
 
 const el = (id: string) => document.getElementById(id);
 
+const ROLE_ICON: Record<string, string> = {
+  Project: '📋', Actions: '⚡', Status: '📊', Capture: '✏️', Logs: '📜', AI: '🤖',
+};
+
+function fmt(v: unknown): string {
+  if (v == null) return '—';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
+}
+
 function randomSeed(): string {
   let seed = localStorage.getItem('cr_seed');
   if (!seed) {
@@ -76,6 +91,8 @@ class DeskletClient {
   private staleTimer = 0;
   private pingTimer = 0;
   private context: Record<string, unknown> = {};
+  /** correlationId -> tile element awaiting an outcome. */
+  private pending = new Map<string, any>();
 
   /** freshToken: true only right after pairing — the single-use session token is
    *  valid for exactly one connect. A session loaded from storage uses the
@@ -100,7 +117,7 @@ class DeskletClient {
   }
 
   private connect(): void {
-    this.setStatus('connecting…');
+    this.setStatus('connecting…', 'connecting');
     let opened = false;
     const ws = new WebSocket(this.url(this.firstConnect));
     this.ws = ws;
@@ -109,7 +126,7 @@ class DeskletClient {
       this.firstConnect = false;
       this.backoff = 500;
       this.lastContext = Date.now();
-      this.setStatus('live');
+      this.setStatus('live', 'live');
       // App-level keepalive: the host marks a desklet stale after 5 s without
       // liveness, and browser auto-pong isn't reliable on mobile, so send our own
       // ping every 2 s. The gateway treats kind:'ping' as a liveness signal.
@@ -130,7 +147,7 @@ class DeskletClient {
   }
 
   private scheduleReconnect(): void {
-    this.setStatus('reconnecting…');
+    this.setStatus('reconnecting…', 'reconnecting');
     const delay = Math.min(this.backoff, RECONNECT_CAP_MS);
     this.backoff = Math.min(this.backoff * 2, RECONNECT_CAP_MS);
     setTimeout(() => this.connect(), delay);
@@ -139,14 +156,24 @@ class DeskletClient {
   private onFrame(frame: any): void {
     if (frame.kind === 'context') {
       this.lastContext = Date.now();
+      const before = JSON.stringify(this.context['workspace.availableActions']);
       // Merge deltas into the running view (IFC-DCF-046: render full current context).
       Object.assign(this.context, frame.payload.deltaFields ?? {});
+      if (JSON.stringify(this.context['workspace.availableActions']) !== before) this.renderActions();
       this.renderContext(frame.payload);
       // Stale only when the host marks the data stale (degraded). A healthy link
       // refreshes lastContext via the host pulse, so the 10s gap check won't fire.
-      el('stale').style.display = frame.payload.stale ? 'block' : 'none';
+      el('stale').style.display = frame.payload.stale ? 'flex' : 'none';
     } else if (frame.kind === 'ack') {
-      this.log(`intent ${frame.correlationId}: ${frame.payload?.status ?? 'ok'}`);
+      const status = String(frame.payload?.status ?? 'ok');
+      const ok = status === 'SUCCESS';
+      const tile = this.pending.get(frame.correlationId);
+      if (tile) {
+        this.pending.delete(frame.correlationId);
+        tile.setAttribute('data-st', ok ? 'ok' : 'bad');
+        setTimeout(() => tile.removeAttribute('data-st'), 1600);
+      }
+      this.log(`${ok ? '✓' : '✕'} ${status.toLowerCase()}`, ok ? 'ok' : 'bad');
     } else if (frame.kind === 'control' && frame.payload?.type === 'role') {
       // The host re-binds the role on reconnect after a switch — adopt it so the
       // display (label + role-specific actions) matches the streamed context.
@@ -156,54 +183,94 @@ class DeskletClient {
         saveSession(this.session);
         this.context = {}; // drop the previous role's view; new role's context follows
         this.renderShell();
-        this.renderContext({ version: 0, digest: '' });
+        this.renderContext();
         this.log(`role changed → ${role}`);
       }
     }
   }
 
   private checkStale(): void {
-    if (Date.now() - this.lastContext > STALENESS_MS) el('stale').style.display = 'block';
+    if (Date.now() - this.lastContext > STALENESS_MS) el('stale').style.display = 'flex';
   }
 
-  dispatchIntent(type: string, data: Record<string, unknown>): void {
-    if (!this.ws || this.ws.readyState !== 1) return this.log('not connected');
-    const correlationId = `c-${Date.now()}`;
-    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type, data } }));
-    this.log(`→ ${type}`);
+  private dispatchAction(action: any, tile: any): void {
+    if (!this.ws || this.ws.readyState !== 1) return this.log('not connected', 'bad');
+    const correlationId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    tile.setAttribute('data-st', 'running');
+    this.pending.set(correlationId, tile);
+    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'action', data: { actionId: action.id } } }));
+    this.log(`→ ${action.label}`);
   }
 
   // --- Rendering ---------------------------------------------------------------
 
   private renderShell(): void {
     el('role').textContent = this.session.role;
+    el('role-sub').textContent = 'desklet';
+    el('role-badge').textContent = ROLE_ICON[this.session.role] ?? '◆';
     el('device').textContent = this.session.deviceId;
-    const actions = el('actions');
-    actions.innerHTML = '';
-    if (this.session.role === 'Actions') {
-      for (const profile of ['launch-ide', 'open-project-urls', 'restore-layout']) {
-        const b = document.createElement('button');
-        b.textContent = profile;
-        b.onclick = () => this.dispatchIntent('launch-tool', { profile });
-        actions.appendChild(b);
-      }
+    el('context-title').textContent = `${this.session.role} context`;
+    this.renderActions();
+  }
+
+  private renderActions(): void {
+    const view = el('actions-view');
+    if (this.session.role !== 'Actions') {
+      view.classList.add('hidden');
+      return;
+    }
+    view.classList.remove('hidden');
+    const list = (this.context['workspace.availableActions'] as any[]) ?? [];
+    const grid = el('tiles');
+    grid.innerHTML = '';
+    if (!list.length) {
+      grid.innerHTML = '<div class="empty">No actions configured — edit config/actions.json on the host.</div>';
+      return;
+    }
+    for (const a of list) {
+      const tile = document.createElement('div');
+      tile.className = 'tile';
+      const ic = document.createElement('div'); ic.className = 'ic'; ic.textContent = a.icon ?? '▶';
+      const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.textContent = a.label ?? a.id;
+      const kind = document.createElement('div'); kind.className = 'kind'; kind.textContent = a.kind ?? '';
+      const state = document.createElement('div'); state.className = 'state';
+      tile.append(ic, lbl, kind, state);
+      tile.onclick = () => this.dispatchAction(a, tile);
+      grid.appendChild(tile);
     }
   }
 
-  private renderContext(payload: any): void {
-    const pre = el('context');
-    pre.textContent = JSON.stringify(this.context, null, 2);
-    el('version').textContent = `v${payload.version} · ${payload.digest?.slice(0, 8) ?? ''}`;
+  private renderContext(payload?: any): void {
+    const wrap = el('context-cards');
+    wrap.innerHTML = '';
+    const keys = Object.keys(this.context).filter((k) => k !== 'workspace.availableActions');
+    if (!keys.length) {
+      wrap.innerHTML = '<div class="empty">waiting for context…</div>';
+    } else {
+      for (const k of keys) {
+        const card = document.createElement('div'); card.className = 'card';
+        const kd = document.createElement('div'); kd.className = 'k';
+        kd.textContent = k.replace(/^workspace\./, '').replace(/([A-Z])/g, ' $1').trim();
+        const vd = document.createElement('div'); vd.className = 'v'; vd.textContent = fmt(this.context[k]);
+        card.append(kd, vd);
+        wrap.appendChild(card);
+      }
+    }
+    if (payload) el('version').textContent = `v${payload.version} · ${(payload.digest ?? '').slice(0, 8)}`;
   }
 
-  private setStatus(s: string): void {
-    el('status').textContent = s;
+  private setStatus(text: string, state: string): void {
+    el('status').textContent = text;
+    el('status-wrap').setAttribute('data-s', state);
   }
 
-  private log(msg: string): void {
-    const line = document.createElement('div');
-    line.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
-    el('log').prepend(line);
+  private log(msg: string, cls = ''): void {
+    const row = document.createElement('div');
+    row.className = 'row' + (cls ? ' ' + cls : '');
+    const t = document.createElement('time'); t.textContent = new Date().toLocaleTimeString();
+    const m = document.createElement('span'); m.textContent = msg;
+    row.append(t, m);
+    el('log').prepend(row);
   }
 }
 

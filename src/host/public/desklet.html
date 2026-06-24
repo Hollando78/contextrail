@@ -3,67 +3,174 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b1020" />
-    <title>ContextRail Desklet</title>
+    <meta name="theme-color" content="#0a0e1a" />
+    <title>ContextRail</title>
     <style>
-      :root { color-scheme: dark; }
-      * { box-sizing: border-box; }
+      :root {
+        color-scheme: dark;
+        --bg: #0a0e1a;
+        --bg2: #0f1525;
+        --panel: #121a2e;
+        --panel2: #161f38;
+        --line: #212c49;
+        --line2: #2c3a63;
+        --ink: #eaf0ff;
+        --mut: #8893b8;
+        --mut2: #5c688c;
+        --accent: #4d8dff;
+        --accent2: #36e2c4;
+        --ok: #38e2a0;
+        --bad: #ff6b81;
+        --warn: #ffbf66;
+        --radius: 16px;
+        --shadow: 0 18px 50px -24px rgba(0, 0, 0, 0.85);
+      }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { margin: 0; height: 100%; }
       body {
-        margin: 0; font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background: #0b1020; color: #e6ebff; padding: env(safe-area-inset-top) 0 0;
+        background:
+          radial-gradient(1100px 520px at 12% -8%, rgba(77, 141, 255, 0.16), transparent 60%),
+          radial-gradient(900px 480px at 100% 0%, rgba(54, 226, 196, 0.10), transparent 55%),
+          var(--bg);
+        color: var(--ink);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        display: flex; flex-direction: column; min-height: 100%;
+        padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
       }
-      header {
+
+      /* Header */
+      .topbar {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 14px 18px; background: #141b34; border-bottom: 1px solid #243056;
-        position: sticky; top: 0;
+        padding: 16px 20px; gap: 12px;
+        background: linear-gradient(180deg, rgba(18, 26, 46, 0.9), rgba(18, 26, 46, 0.55));
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--line);
+        position: sticky; top: 0; z-index: 5;
       }
-      header .role { font-size: 20px; font-weight: 700; letter-spacing: 0.3px; }
-      header .status { font-size: 13px; color: #7fe7c4; }
-      main { padding: 18px; max-width: 720px; margin: 0 auto; }
-      .meta { display: flex; gap: 12px; font-size: 12px; color: #8d99c4; margin-bottom: 14px; flex-wrap: wrap; }
-      #stale {
-        display: none; background: #4a2a12; color: #ffcf99; border: 1px solid #7a4a1f;
-        padding: 8px 12px; border-radius: 8px; margin-bottom: 14px; font-size: 13px;
+      .role { display: flex; align-items: center; gap: 11px; min-width: 0; }
+      .role .badge {
+        width: 38px; height: 38px; flex: 0 0 auto; border-radius: 12px;
+        display: grid; place-items: center; font-size: 19px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        color: #04101e; box-shadow: 0 6px 18px -6px rgba(77, 141, 255, 0.7);
       }
-      #actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-      button {
-        background: #2b6cff; color: white; border: 0; border-radius: 10px;
-        padding: 12px 16px; font-size: 15px; font-weight: 600; cursor: pointer;
+      .role .name { font-size: 19px; font-weight: 740; letter-spacing: 0.2px; }
+      .role .sub { font-size: 11px; color: var(--mut2); margin-top: 1px; }
+      .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--mut); white-space: nowrap; }
+      .status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--mut2); transition: background 0.25s; }
+      .status[data-s="live"] .dot { background: var(--ok); box-shadow: 0 0 0 0 rgba(56, 226, 160, 0.6); animation: pulse 2s infinite; }
+      .status[data-s="live"] { color: var(--ok); }
+      .status[data-s="reconnecting"] .dot, .status[data-s="connecting"] .dot { background: var(--warn); }
+      .status[data-s="reconnecting"], .status[data-s="connecting"] { color: var(--warn); }
+      @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(56,226,160,0.55);} 70% { box-shadow: 0 0 0 7px rgba(56,226,160,0);} 100%{box-shadow:0 0 0 0 rgba(56,226,160,0);} }
+
+      main { flex: 1 1 auto; width: 100%; max-width: 860px; margin: 0 auto; padding: 20px; }
+      h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--mut2); margin: 26px 0 12px; font-weight: 700; }
+      h2:first-child { margin-top: 4px; }
+
+      .banner {
+        display: none; align-items: center; gap: 9px;
+        background: linear-gradient(180deg, rgba(74, 42, 18, 0.8), rgba(58, 33, 14, 0.7));
+        color: var(--warn); border: 1px solid #6a4a1f; border-radius: 12px;
+        padding: 10px 14px; margin-bottom: 18px; font-size: 13px;
       }
-      button:active { transform: translateY(1px); background: #2057d6; }
-      pre {
-        background: #0f1730; border: 1px solid #243056; border-radius: 10px;
-        padding: 14px; overflow: auto; font-size: 13px; color: #c7d2ff;
+
+      /* Action tiles */
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 13px; }
+      .tile {
+        position: relative; border: 1px solid var(--line2); border-radius: var(--radius);
+        background: linear-gradient(180deg, var(--panel2), var(--panel));
+        padding: 18px 14px; cursor: pointer; user-select: none;
+        display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+        min-height: 118px; transition: transform 0.12s ease, border-color 0.2s, box-shadow 0.2s;
+        overflow: hidden;
       }
-      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #8d99c4; margin: 18px 0 8px; }
-      #log { font-size: 12px; color: #9fb0e0; }
-      #log div { padding: 3px 0; border-bottom: 1px solid #1a2banner; }
-      #pair-hint { display: none; color: #ffcf99; margin-top: 14px; }
-      .dot { color: #7fe7c4; }
+      .tile::after {
+        content: ""; position: absolute; inset: 0; border-radius: var(--radius);
+        background: radial-gradient(120px 80px at 80% 0%, rgba(77,141,255,0.18), transparent 70%);
+        opacity: 0; transition: opacity 0.25s;
+      }
+      .tile:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+      .tile:hover::after { opacity: 1; }
+      .tile:active { transform: scale(0.97); }
+      .tile .ic {
+        width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+        font-size: 22px; background: rgba(77, 141, 255, 0.12); border: 1px solid var(--line2);
+      }
+      .tile .lbl { font-size: 14.5px; font-weight: 650; line-height: 1.25; }
+      .tile .kind { font-size: 10.5px; color: var(--mut2); text-transform: uppercase; letter-spacing: 0.8px; margin-top: -6px; }
+      .tile .state {
+        position: absolute; top: 12px; right: 12px; width: 18px; height: 18px; border-radius: 50%;
+        display: grid; place-items: center; font-size: 12px; opacity: 0; transition: opacity 0.2s;
+      }
+      .tile[data-st="running"] .state { opacity: 1; }
+      .tile[data-st="running"] .state::before {
+        content: ""; width: 13px; height: 13px; border-radius: 50%;
+        border: 2px solid var(--accent); border-top-color: transparent; animation: spin 0.7s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .tile[data-st="ok"] { border-color: var(--ok); }
+      .tile[data-st="ok"] .state { opacity: 1; color: var(--ok); }
+      .tile[data-st="ok"] .state::before { content: "✓"; font-weight: 800; }
+      .tile[data-st="bad"] { border-color: var(--bad); }
+      .tile[data-st="bad"] .state { opacity: 1; color: var(--bad); }
+      .tile[data-st="bad"] .state::before { content: "✕"; font-weight: 800; }
+      .empty { color: var(--mut2); font-size: 13.5px; padding: 8px 2px; }
+
+      /* Context cards */
+      .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 11px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 13px; padding: 13px 15px; }
+      .card .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.9px; color: var(--mut2); }
+      .card .v { font-size: 14px; color: var(--ink); margin-top: 5px; word-break: break-word; white-space: pre-wrap; }
+
+      /* Activity */
+      #log { display: flex; flex-direction: column; gap: 0; }
+      #log .row { display: flex; gap: 10px; font-size: 12.5px; padding: 7px 0; border-bottom: 1px solid rgba(33, 44, 73, 0.6); color: var(--mut); }
+      #log .row time { color: var(--mut2); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+      #log .row.ok { color: var(--ok); } #log .row.bad { color: var(--bad); }
+
+      footer.meta { display: flex; gap: 14px; justify-content: center; padding: 14px; font-size: 11px; color: var(--mut2); border-top: 1px solid var(--line); }
+      footer.meta code { color: var(--mut); }
+      #pair-hint { display: none; color: var(--warn); margin-top: 16px; font-size: 13.5px; line-height: 1.6; }
+      .hidden { display: none !important; }
     </style>
   </head>
   <body>
-    <header>
-      <span class="role" id="role">Desklet</span>
-      <span class="status" id="status">starting…</span>
-    </header>
-    <main>
-      <div class="meta">
-        <span>device: <code id="device">—</code></span>
-        <span id="version">—</span>
+    <header class="topbar">
+      <div class="role">
+        <span class="badge" id="role-badge">◆</span>
+        <div><div class="name" id="role">ContextRail</div><div class="sub" id="role-sub">desklet</div></div>
       </div>
-      <div id="stale">⚠ Context is stale — host is in a degraded state.</div>
-      <div id="actions"></div>
-      <h2>Context</h2>
-      <pre id="context">waiting for context…</pre>
+      <div class="status" id="status-wrap" data-s="connecting"><span class="dot"></span><span id="status">starting…</span></div>
+    </header>
+
+    <main>
+      <div class="banner" id="stale">⚠ Context is stale — host is in a degraded state.</div>
+
+      <section id="actions-view" class="hidden">
+        <h2>Actions</h2>
+        <div class="grid" id="tiles"></div>
+      </section>
+
+      <section id="context-view">
+        <h2 id="context-title">Context</h2>
+        <div class="cards" id="context-cards"><div class="empty">waiting for context…</div></div>
+      </section>
+
       <h2>Activity</h2>
       <div id="log"></div>
+
       <div id="pair-hint">
-        This device is not paired. On the host run a new pairing and open the QR/URL it prints
-        (or visit this page with <code>?ott=…</code>).
+        This device isn't paired. On the host, open the console and scan the QR (or open the URL with
+        <code>?ott=…</code>).
       </div>
     </main>
-    <!-- version query busts stale 'immutable'-cached bundles on existing devices -->
-    <script src="/desklet.js?v=4"></script>
+
+    <footer class="meta">
+      <span>device <code id="device">—</code></span>
+      <span id="version">—</span>
+    </footer>
+
+    <script src="/desklet.js?v=5"></script>
   </body>
 </html>

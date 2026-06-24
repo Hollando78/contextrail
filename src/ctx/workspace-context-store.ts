@@ -51,6 +51,13 @@ export class WorkspaceContextStore extends BaseSubsystem {
     await this.rebuildFromLedger();
     this.seedInitialContext();
 
+    // Stream the customisable action set to Actions desklets, and re-stream on change.
+    const actions = this.services.tryGet<import('../actions/actions-registry.js').ActionsRegistry>(SERVICE.Actions);
+    if (actions) {
+      this.publishActions(actions.views());
+      actions.onChange(() => this.publishActions(actions.views()));
+    }
+
     this.unsubscribers.push(
       this.bus.on('command:outcome', (o) => this.onCommandOutcome(o)),
       this.bus.on('desklet:paired', (p) => this.addSubscriber(p.deskletId, p.role as Role)),
@@ -94,8 +101,15 @@ export class WorkspaceContextStore extends BaseSubsystem {
         { attributePath: 'workspace.health', newValue: 'host online', sourceEventType: 'seed' },
         { attributePath: 'workspace.toolStatus', newValue: { host: 'running' }, sourceEventType: 'seed' },
         { attributePath: 'workspace.activeProject', newValue: 'ContextRail', sourceEventType: 'seed' },
-        { attributePath: 'workspace.availableActions', newValue: ['launch-ide', 'open-project-urls', 'restore-layout'], sourceEventType: 'seed' },
       ],
+    });
+  }
+
+  /** Publish the customisable action set (rendered as tiles by Actions desklets). */
+  private publishActions(views: unknown): void {
+    this.ingest({
+      type: 'raw',
+      writes: [{ attributePath: 'workspace.availableActions', newValue: views, sourceEventType: 'actions' }],
     });
   }
 

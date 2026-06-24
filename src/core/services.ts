@@ -26,6 +26,7 @@ export const SERVICE = {
   IntentRouter: 'int.router',
   ModeControl: 'hcr.mode',
   AdminApi: 'has.admin',
+  Actions: 'actions.registry',
 } as const;
 
 /** Mode-control surface the Admin Station uses to drive Maintenance. */

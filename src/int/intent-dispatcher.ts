@@ -12,6 +12,7 @@ import type { Logger } from '../core/logger.js';
 import type { Intent, CommandEnvelope, CommandResult, IntentStatus } from '../core/types.js';
 import type { PolicyEngine } from '../acg/policy-engine.js';
 import type { CommandExecutor } from '../exe/command-dispatcher.js';
+import type { ActionsRegistry } from '../actions/actions-registry.js';
 import { ConflictSerialiser } from './conflict-serialiser.js';
 import { DispatchConfirmer } from './dispatch-confirmer.js';
 import { resolveIntent } from './command-resolver.js';
@@ -19,6 +20,7 @@ import { resolveIntent } from './command-resolver.js';
 export interface DispatcherServices {
   policy: PolicyEngine;
   executorFor: (adapterId: string) => CommandExecutor | undefined;
+  actions?: ActionsRegistry | undefined;
 }
 
 export class IntentDispatcher {
@@ -39,7 +41,7 @@ export class IntentDispatcher {
   async handle(intent: Intent): Promise<void> {
     const conf = this.confirmer.begin(intent);
 
-    const resolved = resolveIntent(intent);
+    const resolved = resolveIntent(intent, this.deps.actions);
     if (!resolved) {
       this.log.warn('unresolvable intent', { type: intent.type, intentId: intent.intentId });
       return conf.settle('FAILURE', { reason: 'INTERNAL_ERROR' });

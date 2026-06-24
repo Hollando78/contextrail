@@ -8,6 +8,7 @@
  * enforces the timeout without launching anything destructive by default.
  */
 import type { Intent, CommandEnvelope } from '../core/types.js';
+import type { ActionsRegistry } from '../actions/actions-registry.js';
 
 export interface Resolved {
   envelope: Omit<CommandEnvelope, 'permitId'>;
@@ -69,8 +70,44 @@ function profileCommand(intentId: string, actionId: string, profile: string): Om
   return { actionId, adapterId: 'local', targetPath: launch.targetPath, args: launch.args, env: {}, intentId, detached: true };
 }
 
-export function resolveIntent(intent: Intent): Resolved | null {
+export function resolveIntent(intent: Intent, actions?: ActionsRegistry): Resolved | null {
   const { type, payload, intentId } = intent;
+
+  // Customisable, config-driven action (preferred path). The desklet dispatches
+  // type 'action' with { actionId }; we resolve it against the Actions Registry.
+  if (type === 'action') {
+    const def = actions?.get(String(payload['actionId'] ?? ''));
+    if (!def) return null;
+    if (def.kind === 'ssh') {
+      return {
+        envelope: {
+          actionId: def.command ?? '',
+          adapterId: 'rag',
+          targetPath: '',
+          args: [],
+          env: { TARGET_HOST: def.host ?? '', COMMAND_CLASS: def.commandClass ?? 'bounded' },
+          intentId,
+        },
+        principal: 'rag',
+        conflictKey: intent.targetContextObject ?? `ssh:${def.host ?? ''}`,
+      };
+    }
+    const gatedId = `action:${def.id}`;
+    if (def.kind === 'script') {
+      return {
+        envelope: { actionId: gatedId, adapterId: 'local', targetPath: def.target ?? process.execPath, args: def.args ?? [], env: {}, intentId },
+        principal: 'local',
+        conflictKey: `action:${def.id}`,
+      };
+    }
+    // app | url → OS launcher, fire-and-forget
+    const launch = osLaunch(def.target ?? '');
+    return {
+      envelope: { actionId: gatedId, adapterId: 'local', targetPath: launch.targetPath, args: launch.args, env: {}, intentId, detached: true },
+      principal: 'local',
+      conflictKey: `action:${def.id}`,
+    };
+  }
 
   switch (type) {
     case 'launch-tool': {

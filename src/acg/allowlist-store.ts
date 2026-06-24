@@ -11,9 +11,12 @@ import type { AllowlistEntry } from '../core/types.js';
 
 /** Default-deny seed: only these explicit allows let the action loop work out of the box. */
 const DEFAULT_ENTRIES: AllowlistEntry[] = [
+  // Config-driven local actions (operator owns config/actions.json) run as 'action:<id>'.
+  { adapter: 'local', actionPattern: 'action:*', effect: 'allow', ruleId: 'seed-local-actions' },
   { adapter: 'local', actionPattern: 'launch-tool:*', effect: 'allow', ruleId: 'seed-local-launch' },
   { adapter: 'local', actionPattern: 'open-url:*', effect: 'allow', ruleId: 'seed-local-url' },
   { adapter: 'local', actionPattern: 'restore-layout', effect: 'allow', ruleId: 'seed-local-layout' },
+  // SSH actions stay default-deny — add explicit allowlist entries in Maintenance.
 ];
 
 export class AllowlistStore {
@@ -28,7 +31,15 @@ export class AllowlistStore {
     try {
       const raw = await readFile(this.path, 'utf8');
       this.entries = JSON.parse(raw) as AllowlistEntry[];
-      this.log.info('allowlist loaded', { entries: this.entries.length });
+      // Merge in any managed default rules (by ruleId) missing from an older file,
+      // so upgrades pick up new seed entries without wiping operator additions.
+      const have = new Set(this.entries.map((e) => e.ruleId).filter(Boolean));
+      const added = DEFAULT_ENTRIES.filter((d) => d.ruleId && !have.has(d.ruleId));
+      if (added.length) {
+        this.entries.push(...added);
+        await this.persist();
+      }
+      this.log.info('allowlist loaded', { entries: this.entries.length, seededAdded: added.length });
     } catch {
       this.entries = [...DEFAULT_ENTRIES];
       await this.persist();

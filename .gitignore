@@ -9,8 +9,9 @@ data/
 certs/
 *.pem
 *.key
-# Operator-local config (domain, cert paths, etc.) — keep the committed sample generic
+# Operator-local config (domain, cert paths, custom actions) — keep committed samples generic
 config/local.config.json
+config/actions.local.json
 # Secrets / env (e.g. Cloudflare API token for DNS-01)
 *.env
 .env

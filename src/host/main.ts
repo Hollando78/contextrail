@@ -13,6 +13,8 @@ import { resolveDataDir, ensureDir } from '../core/paths.js';
 import type { RuntimeContext, Subsystem } from '../core/subsystem.js';
 import { StubSubsystem } from '../core/stub-subsystem.js';
 import { ServiceRegistry } from '../core/services.js';
+import { ActionsRegistry } from '../actions/actions-registry.js';
+import { resolve as resolvePath } from 'node:path';
 import { ConfigurationLoader } from '../hcr/configuration-loader.js';
 import { HostCoreRuntime } from '../hcr/host-core-runtime.js';
 import { WorkspaceContextStore } from '../ctx/workspace-context-store.js';
@@ -54,6 +56,16 @@ async function main(): Promise<void> {
     dataDir,
     services: new ServiceRegistry(),
   };
+
+  // Customisable action set (config-driven, hot-reloaded) — available to all subsystems.
+  const actions = new ActionsRegistry(
+    resolvePath('config/actions.json'),
+    resolvePath('config/actions.local.json'),
+    createLogger('actions'),
+  );
+  actions.load();
+  actions.watch();
+  ctx.services.set(SERVICE.Actions, actions);
 
   const hcr = new HostCoreRuntime(bus, log);
   // Expose a mode-control surface so the Host Admin Station can drive Maintenance.

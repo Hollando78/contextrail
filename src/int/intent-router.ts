@@ -10,6 +10,7 @@ import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../cor
 import { SERVICE } from '../core/services.js';
 import type { PolicyEngine } from '../acg/policy-engine.js';
 import type { CommandExecutor } from '../exe/command-dispatcher.js';
+import type { ActionsRegistry } from '../actions/actions-registry.js';
 import { IntentDispatcher } from './intent-dispatcher.js';
 
 export class IntentRouter extends BaseSubsystem {
@@ -29,6 +30,7 @@ export class IntentRouter extends BaseSubsystem {
       this.bus,
       {
         policy,
+        actions: this.services.tryGet<ActionsRegistry>(SERVICE.Actions),
         executorFor: (adapterId) => {
           if (adapterId === 'rag') return this.services.tryGet<CommandExecutor>(SERVICE.RemoteGateway);
           if (adapterId && adapterId !== 'local') return this.services.tryGet<CommandExecutor>(SERVICE.AdapterFramework);
