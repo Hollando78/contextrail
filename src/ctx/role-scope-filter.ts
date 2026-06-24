@@ -22,6 +22,7 @@ export const DEFAULT_ATTRIBUTE_ROLES: Record<string, Role[]> = {
   toolStatus: ['Status'],
   health: ['Status'],
   hostMode: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI'],
+  hostPulse: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI'],
   pairedDevices: ['Status', 'Project'],
   lastOutcome: ['Status', 'Logs'],
   commandHistory: ['Logs'],
@@ -69,7 +70,8 @@ export class RoleScopeFilter {
     for (const name of deltaFieldNames) {
       const attr = obj.attributes[name];
       if (attr && attr.roles.includes(role)) {
-        deltaFields[name] = attr.value;
+        // Qualified key (object.attribute) so deltas merge cleanly with snapshots.
+        deltaFields[`${obj.id}.${name}`] = attr.value;
         if (attr.stale) anyStale = true;
       }
     }

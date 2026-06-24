@@ -63,6 +63,10 @@ export class HttpStaticAssetServer {
       if (loopback && req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         return await this.serveFile('admin.html', res); // operator console
       }
+      // Loopback dev desklet (localhost-only, no TLS) for development/debugging.
+      if (loopback && req.method === 'GET' && (url.pathname === '/desklet' || url.pathname === '/desklet.html')) {
+        return await this.serveFile('desklet.html', res);
+      }
 
       // --- Device-facing routes (LAN) ---
       if (req.method === 'POST' && url.pathname === '/pair') return await this.handlePair(req, res);

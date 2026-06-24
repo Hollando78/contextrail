@@ -55,6 +55,11 @@ export interface CommandEnvelope {
   intentId: string;
   /** ACG-issued PERMIT the executor verifies before running. (SUB-EXE-021) */
   permitId?: string;
+  /**
+   * Fire-and-forget launch: resolve SUCCESS on spawn (don't wait for exit) and
+   * skip the wall-clock kill, so GUI apps / browser launches persist. Used for
+   * launch-tool / open-url style actions where the OS launcher returns slowly. */
+  detached?: boolean;
 }
 
 /** Result of executing a command. (SUB-EXE-024, IFC-EXE-030) */

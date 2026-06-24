@@ -99,6 +99,8 @@ export class LocalTransportServer extends BaseSubsystem {
       }
       void this.statics.handle(req, res, { loopback: true });
     });
+    // Allow ws:// upgrades on loopback so a localhost dev tab can connect without TLS.
+    this.loopbackServer.on('upgrade', (req, socket, head) => this.gateway.handleUpgrade(req, socket, head));
 
     await this.listen(this.httpsServer, this.config.port, this.config.host);
     await this.listen(this.loopbackServer, this.config.loopbackPort, '127.0.0.1');

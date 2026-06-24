@@ -29,6 +29,7 @@ export class ProcessSupervisor {
   ) {}
 
   run(cmd: CommandEnvelope): Promise<ProcessResult> {
+    if (cmd.detached) return this.runDetached(cmd);
     return new Promise<ProcessResult>((resolve) => {
       const start = Date.now();
       let captured = Buffer.alloc(0);
@@ -89,6 +90,39 @@ export class ProcessSupervisor {
         finish('FAILURE', -1);
       });
       child.on('close', (code) => finish(code === 0 ? 'SUCCESS' : 'FAILURE', code ?? -1));
+    });
+  }
+
+  /**
+   * Fire-and-forget launch: resolve SUCCESS as soon as the process spawns, detach
+   * + unref so the launched app/browser outlives the host, and apply no kill timer.
+   * (Used for launch-tool / open-url; the OS launcher returns slowly on Windows.)
+   */
+  private runDetached(cmd: CommandEnvelope): Promise<ProcessResult> {
+    return new Promise<ProcessResult>((resolve) => {
+      const start = Date.now();
+      const done = (status: ProcessResult['status'], exitCode: number) =>
+        resolve({ intentId: cmd.intentId, status, exitCode, stdoutDigest: '', truncated: false, elapsedMs: Date.now() - start });
+      try {
+        const child = spawn(cmd.targetPath, cmd.args, {
+          env: { ...process.env, ...cmd.env },
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false,
+        });
+        this.onStarted?.(cmd.intentId);
+        child.on('error', (err) => {
+          this.log.warn('detached spawn error', { intentId: cmd.intentId, err: err.message });
+          done('FAILURE', -1);
+        });
+        child.on('spawn', () => {
+          child.unref();
+          done('SUCCESS', 0);
+        });
+      } catch (err) {
+        this.log.warn('detached spawn threw', { intentId: cmd.intentId, err: (err as Error).message });
+        done('FAILURE', -1);
+      }
     });
   }
 

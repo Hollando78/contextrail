@@ -14,7 +14,7 @@
 import { readFile } from 'node:fs/promises';
 import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../core/subsystem.js';
 import { SERVICE } from '../core/services.js';
-import type { Role } from '../core/constants.js';
+import { TIMING, type Role } from '../core/constants.js';
 import type { RoleProjection, CommandOutcome } from '../core/types.js';
 import { ContextObjectRegistry } from './context-object-registry.js';
 import { RoleScopeFilter } from './role-scope-filter.js';
@@ -31,6 +31,8 @@ export class WorkspaceContextStore extends BaseSubsystem {
   private readonly subscribers = new Map<string, Role>();
   private locked = false;
   private degraded = false;
+  private pulseTimer: NodeJS.Timeout | undefined;
+  private readonly startedAt = Date.now();
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(ctx: RuntimeContext) {
@@ -57,8 +59,30 @@ export class WorkspaceContextStore extends BaseSubsystem {
       this.bus.on('lock:released', () => this.setLocked(false)),
       this.bus.on('mode:changed', (m) => this.onModeChanged(m.to)),
     );
+    // Periodic host-status pulse (all roles) at half the desklet staleness window,
+    // so a healthy link keeps receiving fresh frames and the staleness indicator
+    // reflects real link/host health rather than merely-unchanging data. (SUB-KWD-068)
+    const pulseEvery = Math.floor(TIMING.STALENESS_INDICATOR_MS / 2);
+    this.pulseTimer = setInterval(() => this.pulse(), pulseEvery);
+    this.pulseTimer.unref?.();
+
     this.services.set(SERVICE.ContextStore, this);
-    this.log.info('workspace context store ready', { objects: this.registry.list().length });
+    this.log.info('workspace context store ready', { objects: this.registry.list().length, pulseMs: pulseEvery });
+  }
+
+  /** Emit a lightweight host-status heartbeat visible to every role. */
+  private pulse(): void {
+    if (this.locked) return; // no context streamed while locked
+    this.ingest({
+      type: 'raw',
+      writes: [
+        {
+          attributePath: 'workspace.hostPulse',
+          newValue: { ts: new Date().toISOString(), uptimeSec: Math.round((Date.now() - this.startedAt) / 1000) },
+          sourceEventType: 'pulse',
+        },
+      ],
+    });
   }
 
   /** Seed baseline host context so a freshly-joined desklet always renders something. */
@@ -76,6 +100,7 @@ export class WorkspaceContextStore extends BaseSubsystem {
   }
 
   override async stop(): Promise<void> {
+    if (this.pulseTimer) clearInterval(this.pulseTimer);
     for (const off of this.unsubscribers.splice(0)) off();
     this.subscribers.clear();
   }

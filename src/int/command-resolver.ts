@@ -66,7 +66,7 @@ function profileCommand(intentId: string, actionId: string, profile: string): Om
     default:
       return localEcho(intentId, actionId, `ContextRail: no host command for profile '${profile}'`);
   }
-  return { actionId, adapterId: 'local', targetPath: launch.targetPath, args: launch.args, env: {}, intentId };
+  return { actionId, adapterId: 'local', targetPath: launch.targetPath, args: launch.args, env: {}, intentId, detached: true };
 }
 
 export function resolveIntent(intent: Intent): Resolved | null {
@@ -86,7 +86,7 @@ export function resolveIntent(intent: Intent): Resolved | null {
       const url = String(payload['url'] ?? '');
       const actionId = `open-url:${url}`;
       return {
-        envelope: { actionId, adapterId: 'local', ...osLaunch(url), env: {}, intentId },
+        envelope: { actionId, adapterId: 'local', ...osLaunch(url), env: {}, intentId, detached: true },
         principal: 'local',
         conflictKey: intent.targetContextObject ?? 'workspace.openTools',
       };

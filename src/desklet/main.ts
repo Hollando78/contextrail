@@ -74,6 +74,7 @@ class DeskletClient {
   private firstConnect = true;
   private staleTimer = 0;
   private pingTimer = 0;
+  private readonly context: Record<string, unknown> = {};
 
   constructor(private session: Session) {}
 
@@ -84,7 +85,9 @@ class DeskletClient {
   }
 
   private url(useToken: boolean): string {
-    const base = `wss://${location.host}/`;
+    // wss on the LAN (TLS), ws on a loopback http dev tab (localhost = secure context).
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    const base = `${scheme}://${location.host}/`;
     const q = new URLSearchParams({ fp: this.session.fingerprint, deviceId: this.session.deviceId });
     if (useToken) q.set('token', this.session.sessionToken);
     return `${base}?${q.toString()}`;
@@ -125,7 +128,11 @@ class DeskletClient {
   private onFrame(frame: any): void {
     if (frame.kind === 'context') {
       this.lastContext = Date.now();
+      // Merge deltas into the running view (IFC-DCF-046: render full current context).
+      Object.assign(this.context, frame.payload.deltaFields ?? {});
       this.renderContext(frame.payload);
+      // Stale only when the host marks the data stale (degraded). A healthy link
+      // refreshes lastContext via the host pulse, so the 10s gap check won't fire.
       el('stale').style.display = frame.payload.stale ? 'block' : 'none';
     } else if (frame.kind === 'ack') {
       this.log(`intent ${frame.correlationId}: ${frame.payload?.status ?? 'ok'}`);
@@ -162,7 +169,7 @@ class DeskletClient {
 
   private renderContext(payload: any): void {
     const pre = el('context');
-    pre.textContent = JSON.stringify(payload.deltaFields ?? {}, null, 2);
+    pre.textContent = JSON.stringify(this.context, null, 2);
     el('version').textContent = `v${payload.version} · ${payload.digest?.slice(0, 8) ?? ''}`;
   }
 
