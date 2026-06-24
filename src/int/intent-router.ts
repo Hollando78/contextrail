@@ -11,7 +11,9 @@ import { SERVICE } from '../core/services.js';
 import type { PolicyEngine } from '../acg/policy-engine.js';
 import type { CommandExecutor } from '../exe/command-dispatcher.js';
 import type { ActionsRegistry } from '../actions/actions-registry.js';
+import type { WorkspaceContextStore } from '../ctx/workspace-context-store.js';
 import { IntentDispatcher } from './intent-dispatcher.js';
+import { buildDataHandlers } from './data-intent-handlers.js';
 
 export class IntentRouter extends BaseSubsystem {
   readonly name = 'IntentRouter';
@@ -26,6 +28,7 @@ export class IntentRouter extends BaseSubsystem {
 
   override async start(): Promise<void> {
     const policy = this.services.get<PolicyEngine>(SERVICE.PolicyEngine);
+    const ctxStore = this.services.tryGet<WorkspaceContextStore>(SERVICE.ContextStore);
     this.dispatcher = new IntentDispatcher(
       this.bus,
       {
@@ -36,6 +39,8 @@ export class IntentRouter extends BaseSubsystem {
           if (adapterId && adapterId !== 'local') return this.services.tryGet<CommandExecutor>(SERVICE.AdapterFramework);
           return this.services.tryGet<CommandExecutor>(SERVICE.Executor);
         },
+        // Data intents (Capture notes, AI queries) are role-scoped, default-deny.
+        dataHandlers: buildDataHandlers(ctxStore),
       },
       this.log.child('dispatch'),
       this.config.failureCircuitThreshold,

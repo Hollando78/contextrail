@@ -67,6 +67,58 @@
       .meter .spark polyline { fill: none; stroke: var(--signal); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
       .meter .spark .area { fill: var(--signal-soft); stroke: none; }
 
+      /* Project — operator dashboard */
+      .prj-hero { padding: 22px 22px 20px; margin-bottom: 4px; position: relative; overflow: hidden; }
+      .prj-hero .eyebrow { color: var(--signal); }
+      .prj-hero .name { font: 700 30px/1.05 var(--font-sans); letter-spacing: -0.4px; margin: 7px 0 10px; }
+      .prj-hero .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font: 500 12.5px/1 var(--font-mono); color: var(--muted); }
+      .prj-hero .meta b { color: var(--text); font-weight: 600; }
+      .prj-hero::after { content: ""; position: absolute; right: -40px; top: -40px; width: 150px; height: 150px; border-radius: 50%;
+        background: radial-gradient(circle, var(--signal-soft), transparent 70%); pointer-events: none; }
+      .dev-row { display: flex; align-items: center; gap: 12px; }
+      .dev-row .rc { font: 700 11px/1 var(--font-mono); letter-spacing: 0.06em; color: var(--signal);
+        background: var(--signal-soft); border: 1px solid var(--rail-2); border-radius: var(--r-pill); padding: 6px 9px; flex: 0 0 auto; }
+      .dev-row .did { font: 500 12.5px/1.3 var(--font-mono); color: var(--muted); word-break: break-all; }
+
+      /* Logs — live stream + history */
+      .stream { display: flex; flex-direction: column; gap: 0; border: var(--hair); border-radius: var(--r-card);
+        background: var(--ink-2); overflow: hidden; max-height: 360px; overflow-y: auto; }
+      .logrow { display: grid; grid-template-columns: 64px 58px 1fr; gap: 10px; padding: 6px 13px; align-items: baseline;
+        font: 400 12px/1.45 var(--font-mono); border-bottom: 1px solid rgba(38, 47, 59, 0.5); }
+      .logrow:last-child { border-bottom: 0; }
+      .logrow time { color: var(--muted-2); font-variant-numeric: tabular-nums; }
+      .logrow .lv { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
+      .logrow .lv.info { color: var(--cool); } .logrow .lv.warn { color: var(--warn); }
+      .logrow .lv.error { color: var(--fault); } .logrow .lv.debug { color: var(--muted-2); }
+      .logrow .lm { color: var(--text); word-break: break-word; }
+      .logrow .lm .sc { color: var(--muted-2); }
+
+      /* Composer (Capture + AI input) */
+      .composer { border: var(--hair); border-radius: var(--r-card); background: var(--housing); padding: 12px; }
+      .composer textarea { width: 100%; resize: vertical; border: 0; background: transparent; color: var(--text);
+        font: 400 14.5px/1.5 var(--font-sans); outline: none; padding: 2px; }
+      .composer textarea::placeholder { color: var(--muted-2); }
+      .composer-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+      .composer .hint { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--muted-2); }
+      .composer .btn { padding: 9px 18px; }
+
+      /* Capture — note cards */
+      .notes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 11px; }
+      .note { display: flex; flex-direction: column; gap: 9px; }
+      .note .txt { font: 400 14px/1.5 var(--font-sans); color: var(--text); white-space: pre-wrap; word-break: break-word; }
+      .note time { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--muted-2); }
+
+      /* AI — assistant thread + suggestion chips */
+      .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+      .chip { cursor: pointer; user-select: none; font: 600 12px/1 var(--font-sans); color: var(--text);
+        background: var(--housing-2); border: 1px solid var(--rail-2); border-radius: var(--r-pill); padding: 9px 14px;
+        transition: border-color var(--t), color var(--t); }
+      .chip:hover { border-color: var(--signal); color: var(--signal); }
+      .transcript { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+      .msg { max-width: 86%; padding: 11px 14px; border-radius: 14px; font: 400 14px/1.5 var(--font-sans); white-space: pre-wrap; word-break: break-word; }
+      .msg.you { align-self: flex-end; background: linear-gradient(180deg, #ffd071, var(--signal)); color: #07101a; border-bottom-right-radius: 5px; }
+      .msg.assistant { align-self: flex-start; background: var(--housing-2); border: var(--hair); color: var(--text); border-bottom-left-radius: 5px; }
+
       /* Context — readout cards */
       .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 11px; }
       .card .k { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted-2); }
@@ -113,6 +165,40 @@
         <div class="cards" id="readouts"></div>
       </section>
 
+      <section id="project-view" class="hidden">
+        <div class="card prj-hero" id="prj-hero"></div>
+        <div class="eyebrow sec">Devices</div>
+        <div class="cards" id="prj-devices"></div>
+        <div class="eyebrow sec">Host</div>
+        <div class="cards" id="prj-vitals"></div>
+      </section>
+
+      <section id="logs-view" class="hidden">
+        <div class="eyebrow sec">Log stream</div>
+        <div class="stream" id="log-stream"></div>
+        <div class="eyebrow sec">Command history</div>
+        <div class="cards" id="cmd-history"></div>
+      </section>
+
+      <section id="capture-view" class="hidden">
+        <div class="eyebrow sec">New capture</div>
+        <div class="composer">
+          <textarea id="cap-input" rows="3" placeholder="Capture a note, snippet, or idea…"></textarea>
+          <div class="composer-row"><span class="hint" id="cap-hint">stored on the host</span><button class="btn" id="cap-send">Capture</button></div>
+        </div>
+        <div class="eyebrow sec">Captured</div>
+        <div class="notes" id="cap-list"></div>
+      </section>
+
+      <section id="ai-view" class="hidden">
+        <div class="chips" id="ai-suggest"></div>
+        <div class="transcript" id="ai-thread"></div>
+        <div class="composer">
+          <textarea id="ai-input" rows="2" placeholder="Ask about host status, devices, or actions…"></textarea>
+          <div class="composer-row"><span class="hint">on-host assistant</span><button class="btn" id="ai-send">Ask</button></div>
+        </div>
+      </section>
+
       <section id="context-view">
         <div class="eyebrow sec" id="context-title">Context</div>
         <div class="cards" id="context-cards"><div class="empty">waiting for context…</div></div>
@@ -132,6 +218,6 @@
       <span id="version">—</span>
     </footer>
 
-    <script src="/desklet.js?v=9"></script>
+    <script src="/desklet.js?v=10"></script>
   </body>
 </html>

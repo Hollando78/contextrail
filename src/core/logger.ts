@@ -21,16 +21,31 @@ export interface Logger {
   child(scope: string): Logger;
 }
 
+/** A trimmed log record retained in the in-memory ring for the Logs role. */
+export interface LogRecord {
+  ts: string;
+  level: LogLevel;
+  scope: string;
+  msg: string;
+}
+
+// Bounded ring of recently-emitted records so the Logs desklet can show a live
+// host tail without re-reading stderr. Holds only emitted lines (post-threshold).
+const RING_MAX = 200;
+const ring: LogRecord[] = [];
+
+/** The most recent emitted log records (oldest→newest), capped at `limit`. */
+export function recentLogs(limit = 50): LogRecord[] {
+  return limit >= ring.length ? ring.slice() : ring.slice(ring.length - limit);
+}
+
 function emit(scope: string, level: LogLevel, msg: string, fields?: Record<string, unknown>): void {
   if (LEVEL_RANK[level] < LEVEL_RANK[threshold]) return;
-  const record = {
-    ts: new Date().toISOString(),
-    level,
-    scope,
-    msg,
-    ...(fields ?? {}),
-  };
+  const ts = new Date().toISOString();
+  const record = { ts, level, scope, msg, ...(fields ?? {}) };
   process.stderr.write(JSON.stringify(record) + '\n');
+  ring.push({ ts, level, scope, msg });
+  if (ring.length > RING_MAX) ring.shift();
 }
 
 export function createLogger(scope: string): Logger {

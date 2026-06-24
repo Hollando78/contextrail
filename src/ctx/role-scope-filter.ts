@@ -24,15 +24,16 @@ export const DEFAULT_ATTRIBUTE_ROLES: Record<string, Role[]> = {
   hostMode: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI'],
   hostPulse: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI'],
   pairedDevices: ['Status', 'Project'],
-  // Resource-monitor metrics (Status role).
+  // Resource-monitor metrics (Status role); a few host vitals also feed the
+  // Project operator dashboard.
   cpu: ['Status'],
   memory: ['Status'],
   disk: ['Status'],
   uptime: ['Status'],
-  load: ['Status'],
-  cores: ['Status'],
+  load: ['Status', 'Project'],
+  cores: ['Status', 'Project'],
   cpuModel: ['Status'],
-  platform: ['Status'],
+  platform: ['Status', 'Project'],
   hostProc: ['Status'],
   devices: ['Status', 'Project'],
   lastOutcome: ['Status', 'Logs'],

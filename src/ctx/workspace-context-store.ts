@@ -11,7 +11,7 @@
  * - In Degraded mode serves the last snapshot and marks attributes stale. (SUB-CTX-034)
  * - Rebuilds the snapshot from the Device Identity Ledger on restart. (SUB-CTX-080)
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, appendFile } from 'node:fs/promises';
 import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../core/subsystem.js';
 import { SERVICE } from '../core/services.js';
 import { TIMING, type Role } from '../core/constants.js';
@@ -20,6 +20,7 @@ import { ContextObjectRegistry } from './context-object-registry.js';
 import { RoleScopeFilter } from './role-scope-filter.js';
 import { EventBusAdapter, type WorkspaceEvent } from './event-bus-adapter.js';
 import { dataPaths } from '../core/paths.js';
+import { recentLogs } from '../core/logger.js';
 import { SystemMetrics } from '../host/system-metrics.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import type { LocalTransportServer } from '../xpt/local-transport-server.js';
@@ -39,6 +40,12 @@ export class WorkspaceContextStore extends BaseSubsystem {
   private readonly metrics = new SystemMetrics(this.config.dataDir);
   private readonly unsubscribers: Array<() => void> = [];
 
+  /** Capture role: operator notes/snippets, persisted to data/captures.jsonl. */
+  private captures: Array<{ id: string; text: string; at: string }> = [];
+  private captureSeq = 0;
+  /** AI role: the on-host assistant conversation transcript. */
+  private aiHistory: Array<{ role: 'you' | 'assistant'; text: string; at: string }> = [];
+
   constructor(ctx: RuntimeContext) {
     super(ctx);
     this.init();
@@ -54,6 +61,8 @@ export class WorkspaceContextStore extends BaseSubsystem {
   override async start(): Promise<void> {
     await this.rebuildFromLedger();
     this.seedInitialContext();
+    await this.loadCaptures();
+    this.seedAssistant();
 
     // Stream the customisable action set to Actions desklets, and re-stream on change.
     const actions = this.services.tryGet<import('../actions/actions-registry.js').ActionsRegistry>(SERVICE.Actions);
@@ -90,13 +99,16 @@ export class WorkspaceContextStore extends BaseSubsystem {
     const m = await this.metrics.sample();
     const ledger = this.services.tryGet<DeviceIdentityLedger>(SERVICE.DeviceLedger);
     const transport = this.services.tryGet<LocalTransportServer>(SERVICE.Transport);
-    const paired = ledger?.count() ?? 0;
+    const ledgerDevices = ledger?.list() ?? [];
+    const paired = ledgerDevices.length;
     const live = transport?.connectedDeviceIds().length ?? 0;
 
     this.ingest({
       type: 'raw',
       writes: [
         { attributePath: 'workspace.hostPulse', newValue: { ts: new Date().toISOString(), uptimeSec: Math.round((Date.now() - this.startedAt) / 1000) }, sourceEventType: 'pulse' },
+        // Keep the paired-device list (Status + Project) live as roles change.
+        { attributePath: 'workspace.pairedDevices', newValue: ledgerDevices.map((d) => ({ deviceId: d.deviceId, role: d.role })), sourceEventType: 'pulse' },
         { attributePath: 'workspace.cpu', newValue: m.cpu, sourceEventType: 'metrics' },
         { attributePath: 'workspace.memory', newValue: m.memory, sourceEventType: 'metrics' },
         { attributePath: 'workspace.disk', newValue: m.disk, sourceEventType: 'metrics' },
@@ -107,6 +119,8 @@ export class WorkspaceContextStore extends BaseSubsystem {
         { attributePath: 'workspace.platform', newValue: m.platform, sourceEventType: 'metrics' },
         { attributePath: 'workspace.hostProc', newValue: { rssMB: m.procRssMB }, sourceEventType: 'metrics' },
         { attributePath: 'workspace.devices', newValue: { live, paired }, sourceEventType: 'metrics' },
+        // Live host log tail for the Logs role (newest last).
+        { attributePath: 'workspace.logs', newValue: recentLogs(40), sourceEventType: 'logs' },
       ],
     });
   }
@@ -130,6 +144,145 @@ export class WorkspaceContextStore extends BaseSubsystem {
       type: 'raw',
       writes: [{ attributePath: 'workspace.availableActions', newValue: views, sourceEventType: 'actions' }],
     });
+  }
+
+  // --- Capture role ------------------------------------------------------------
+
+  /** Restore persisted captures from disk so the Capture desklet sees its notes. */
+  private async loadCaptures(): Promise<void> {
+    const file = dataPaths(this.config.dataDir).captures;
+    try {
+      const raw = await readFile(file, 'utf8');
+      this.captures = raw
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l))
+        .filter((c) => c && typeof c.text === 'string');
+      this.captureSeq = this.captures.length;
+      this.log.info('captures loaded', { count: this.captures.length });
+    } catch {
+      this.captures = [];
+    }
+    this.publishCaptures();
+  }
+
+  /** Append a captured note (from a Capture desklet intent) and persist it. */
+  addCapture(text: string): { id: string; text: string; at: string } {
+    const t = text.trim().slice(0, 2000);
+    if (!t) throw new Error('empty capture');
+    const cap = { id: `cap-${++this.captureSeq}-${Date.now().toString(36)}`, text: t, at: new Date().toISOString() };
+    this.captures.push(cap);
+    if (this.captures.length > 500) this.captures = this.captures.slice(-500);
+    const file = dataPaths(this.config.dataDir).captures;
+    void appendFile(file, JSON.stringify(cap) + '\n').catch((e) =>
+      this.log.warn('capture persist failed', { err: (e as Error).message }),
+    );
+    this.publishCaptures();
+    return cap;
+  }
+
+  /** Stream the capture list to Capture desklets (most recent first). */
+  private publishCaptures(): void {
+    this.ingest({
+      type: 'raw',
+      writes: [{ attributePath: 'workspace.captures', newValue: [...this.captures].reverse().slice(0, 100), sourceEventType: 'capture' }],
+    });
+  }
+
+  // --- AI role: on-host workspace assistant ------------------------------------
+
+  /** Seed the assistant greeting + initial suggestion chips. */
+  private seedAssistant(): void {
+    if (!this.aiHistory.length) {
+      this.aiHistory.push({
+        role: 'assistant',
+        text: 'ContextRail assistant ready. Ask about host status, connected devices, or available actions.',
+        at: new Date().toISOString(),
+      });
+    }
+    this.publishAi();
+  }
+
+  /**
+   * Answer an AI-role query. A deterministic, on-host assistant: it reasons over
+   * the live workspace context (no external model, no network) so the AI desklet
+   * is fully functional out of the box. The single `answerFor` seam is where a
+   * real LLM call would slot in if an operator wires one up.
+   */
+  runAssistant(query: string): { answer: string } {
+    const q = query.trim().slice(0, 2000);
+    if (!q) throw new Error('empty query');
+    const now = new Date().toISOString();
+    this.aiHistory.push({ role: 'you', text: q, at: now });
+    const answer = this.answerFor(q);
+    this.aiHistory.push({ role: 'assistant', text: answer, at: new Date().toISOString() });
+    if (this.aiHistory.length > 100) this.aiHistory = this.aiHistory.slice(-100);
+    this.publishAi();
+    return { answer };
+  }
+
+  private publishAi(): void {
+    this.ingest({
+      type: 'raw',
+      writes: [
+        { attributePath: 'workspace.aiContext', newValue: this.aiHistory.slice(-50), sourceEventType: 'ai' },
+        {
+          attributePath: 'workspace.aiSuggestions',
+          newValue: [
+            { label: 'Host status', query: 'status' },
+            { label: 'Connected devices', query: 'devices' },
+            { label: 'Available actions', query: 'actions' },
+          ],
+          sourceEventType: 'ai',
+        },
+      ],
+    });
+  }
+
+  /** Read a current workspace attribute value from the authoritative registry. */
+  private attr<T>(name: string): T | undefined {
+    return this.registry.get('workspace')?.attributes[name]?.value as T | undefined;
+  }
+
+  /** The on-host assistant's reasoning over live context. */
+  private answerFor(query: string): string {
+    const ql = query.toLowerCase();
+    const mode = this.attr<string>('hostMode') ?? 'unknown';
+    const cpu = this.attr<number>('cpu');
+    const mem = this.attr<{ pct: number; usedMB: number; totalMB: number }>('memory');
+    const disk = this.attr<{ pct: number; usedGB: number; totalGB: number }>('disk');
+    const dev = this.attr<{ live: number; paired: number }>('devices');
+    const pulse = this.attr<{ uptimeSec: number }>('hostPulse');
+    const cores = this.attr<number>('cores');
+    const platform = this.attr<string>('platform');
+    const actions = this.attr<Array<{ label: string }>>('availableActions') ?? [];
+
+    const gb1 = (mb: number) => (mb / 1024).toFixed(1);
+    const uptime = (sec?: number) => {
+      if (typeof sec !== 'number') return '—';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return (h ? `${h}h ` : '') + `${m}m`;
+    };
+    const statusLine = `Host is ${mode}. CPU ${cpu ?? '–'}%${mem ? `, memory ${mem.pct}% (${gb1(mem.usedMB)}/${gb1(mem.totalMB)} GB)` : ''}${disk ? `, disk ${disk.pct}%` : ''}. Uptime ${uptime(pulse?.uptimeSec)}.`;
+
+    if (/\b(help|what can you|capab|how do)\b/.test(ql)) {
+      return 'I report on this host from its live context. Try "status" for resources, "devices" for who is paired, or "actions" to see what the Actions role can run. I run entirely on-host — no data leaves this machine.';
+    }
+    if (/\b(device|paired|connected|phone|tablet|who)\b/.test(ql)) {
+      return dev
+        ? `${dev.live} device${dev.live === 1 ? '' : 's'} live, ${dev.paired} paired in total.`
+        : 'Device information is not available yet.';
+    }
+    if (/\b(action|run|launch|open|do|tool)\b/.test(ql)) {
+      return actions.length
+        ? `The Actions role can run: ${actions.map((a) => a.label).join(', ')}.`
+        : 'No actions are configured. Edit config/actions.json on the host to add some.';
+    }
+    if (/\b(status|health|cpu|memory|ram|disk|load|resource|uptime|how.*(doing|running|going))\b/.test(ql)) {
+      return statusLine + (cores ? ` ${cores} cores, ${platform}.` : '');
+    }
+    return `I'm a workspace assistant for this host. ${statusLine} Ask me about "devices" or "actions", or type "help".`;
   }
 
   override async stop(): Promise<void> {
@@ -265,7 +418,7 @@ export class WorkspaceContextStore extends BaseSubsystem {
         attributePath: 'workspace.pairedDevices',
         newValue: devices.map((d: { deviceId: string; role: string }) => ({ deviceId: d.deviceId, role: d.role })),
         sourceEventType: 'rebuild',
-        roles: ['Status'],
+        // Default map scopes this to Status + Project (the operator dashboard).
       });
       this.registry.setStale(true);
       this.log.info('rebuilt context from ledger', { devices: devices.length });

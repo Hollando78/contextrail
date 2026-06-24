@@ -34,6 +34,7 @@ export function dataPaths(dataDir: string) {
     sshAudit: join(root, 'ssh-audit.jsonl'),
     adapterRegistry: join(root, 'adapter-registry.jsonl'),
     contextSnapshot: join(root, 'context-snapshot.json'),
+    captures: join(root, 'captures.jsonl'),
     deepSocket:
       process.platform === 'win32'
         ? join('\\\\.\\pipe\\contextrail-deep')

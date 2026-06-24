@@ -64,6 +64,22 @@ function fmtUptime(sec: unknown): string {
 
 const gb = (mb: number): string => (mb / 1024).toFixed(1);
 
+/** Trim the noisy logger scope prefixes for the Logs stream. */
+function shortScope(scope: string): string {
+  return (scope ?? '').replace(/^contextrail:/, '').replace(/^sub:/, '');
+}
+
+/** A capture timestamp shown as time today, else short date + time. */
+function fmtWhen(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return sameDay ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+}
+
 function randomSeed(): string {
   let seed = localStorage.getItem('cr_seed');
   if (!seed) {
@@ -111,8 +127,8 @@ class DeskletClient {
   private staleTimer = 0;
   private pingTimer = 0;
   private context: Record<string, unknown> = {};
-  /** correlationId -> tile element awaiting an outcome. */
-  private pending = new Map<string, any>();
+  /** correlationId -> callback invoked with the dispatch outcome. */
+  private pending = new Map<string, (ok: boolean, status: string) => void>();
   /** rolling CPU samples for the Status sparkline. */
   private cpuHistory: number[] = [];
 
@@ -178,14 +194,16 @@ class DeskletClient {
   private onFrame(frame: any): void {
     if (frame.kind === 'context') {
       this.lastContext = Date.now();
-      const before = JSON.stringify(this.context['workspace.availableActions']);
+      const beforeActions = JSON.stringify(this.context['workspace.availableActions']);
       // Merge deltas into the running view (IFC-DCF-046: render full current context).
       Object.assign(this.context, frame.payload.deltaFields ?? {});
-      if (this.session.role === 'Status') {
-        this.renderStatus();
+      // Actions re-render only when the action set changes, so an in-flight tile's
+      // running/ok/bad state isn't wiped by a routine host pulse. Other roles
+      // re-render from their dynamic containers (inputs/scroll are preserved).
+      if (this.session.role === 'Actions') {
+        if (JSON.stringify(this.context['workspace.availableActions']) !== beforeActions) this.renderActions();
       } else {
-        if (JSON.stringify(this.context['workspace.availableActions']) !== before) this.renderActions();
-        this.renderContext();
+        this.renderRole();
       }
       el('version').textContent = `v${frame.payload.version} · ${(frame.payload.digest ?? '').slice(0, 8)}`;
       // Stale only when the host marks the data stale (degraded). A healthy link
@@ -194,13 +212,12 @@ class DeskletClient {
     } else if (frame.kind === 'ack') {
       const status = String(frame.payload?.status ?? 'ok');
       const ok = status === 'SUCCESS';
-      const tile = this.pending.get(frame.correlationId);
-      if (tile) {
+      const cb = this.pending.get(frame.correlationId);
+      if (cb) {
         this.pending.delete(frame.correlationId);
-        tile.setAttribute('data-st', ok ? 'ok' : 'bad');
-        setTimeout(() => tile.removeAttribute('data-st'), 1600);
+        cb(ok, status);
       }
-      this.log(`${ok ? '✓' : '✕'} ${status.toLowerCase()}`, ok ? 'ok' : 'bad');
+      this.log(`${ok ? 'ok' : 'fail'} · ${status.toLowerCase()}`, ok ? 'ok' : 'bad');
     } else if (frame.kind === 'control' && frame.payload?.type === 'role') {
       // The host re-binds the role on reconnect after a switch — adopt it so the
       // display (label + role-specific actions) matches the streamed context.
@@ -220,16 +237,63 @@ class DeskletClient {
     if (Date.now() - this.lastContext > STALENESS_MS) el('stale').style.display = 'flex';
   }
 
+  private cid(): string {
+    return `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  }
+
   private dispatchAction(action: any, tile: any): void {
     if (!this.ws || this.ws.readyState !== 1) return this.log('not connected', 'bad');
-    const correlationId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const correlationId = this.cid();
     tile.setAttribute('data-st', 'running');
-    this.pending.set(correlationId, tile);
+    this.pending.set(correlationId, (ok) => {
+      tile.setAttribute('data-st', ok ? 'ok' : 'bad');
+      setTimeout(() => tile.removeAttribute('data-st'), 1600);
+    });
     this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'action', data: { actionId: action.id } } }));
     this.log(`→ ${action.label}`);
   }
 
+  /** Send a Capture-role note; clears the field on confirmed capture. */
+  private sendCapture(): void {
+    const ta = el('cap-input');
+    const text = (ta?.value ?? '').trim();
+    if (!text) return;
+    if (!this.ws || this.ws.readyState !== 1) return this.setHint('cap-hint', 'not connected');
+    const correlationId = this.cid();
+    this.pending.set(correlationId, (ok) => {
+      if (ok) { ta.value = ''; this.setHint('cap-hint', 'captured', true); }
+      else this.setHint('cap-hint', 'capture failed', true);
+    });
+    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'capture', data: { text } } }));
+    this.setHint('cap-hint', 'saving…');
+  }
+
+  /** Send an AI-role query (from the box or a suggestion chip). */
+  private sendAi(query?: string): void {
+    const ta = el('ai-input');
+    const text = (query ?? ta?.value ?? '').trim();
+    if (!text) return;
+    if (!this.ws || this.ws.readyState !== 1) return this.log('not connected', 'bad');
+    const correlationId = this.cid();
+    this.pending.set(correlationId, () => {}); // the answer arrives via aiContext
+    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'ai-query', data: { query: text } } }));
+    if (!query && ta) ta.value = '';
+  }
+
+  private setHint(id: string, text: string, revert = false): void {
+    const node = el(id);
+    if (!node) return;
+    node.textContent = text;
+    if (revert) setTimeout(() => { if (el(id)) el(id).textContent = 'stored on the host'; }, 1800);
+  }
+
   // --- Rendering ---------------------------------------------------------------
+
+  /** role -> its purpose-built view section id. */
+  private static readonly VIEWS: Record<string, string> = {
+    Actions: 'actions-view', Status: 'status-view', Project: 'project-view',
+    Logs: 'logs-view', Capture: 'capture-view', AI: 'ai-view',
+  };
 
   private renderShell(): void {
     const role = this.session.role;
@@ -238,13 +302,144 @@ class DeskletClient {
     el('role-badge').textContent = ROLE_CODE[role] ?? '··';
     el('device').textContent = this.session.deviceId;
     el('context-title').textContent = `${role} context`;
-    const isActions = role === 'Actions';
-    const isStatus = role === 'Status';
-    el('actions-view').classList.toggle('hidden', !isActions);
-    el('status-view').classList.toggle('hidden', !isStatus);
-    el('context-view').classList.toggle('hidden', isStatus); // meters replace generic cards for Status
-    if (isActions) this.renderActions();
-    if (isStatus) this.renderStatus();
+    const active = DeskletClient.VIEWS[role];
+    for (const id of ['actions-view', 'status-view', 'project-view', 'logs-view', 'capture-view', 'ai-view']) {
+      el(id).classList.toggle('hidden', id !== active);
+    }
+    // The generic context-view is only a fallback for an unrecognised role.
+    el('context-view').classList.toggle('hidden', !!active);
+    this.wireInputs();
+    this.renderRole();
+  }
+
+  /** Idempotently bind the Capture/AI composer controls. */
+  private wireInputs(): void {
+    const capSend = el('cap-send'); if (capSend) capSend.onclick = () => this.sendCapture();
+    const aiSend = el('ai-send'); if (aiSend) aiSend.onclick = () => this.sendAi();
+    const capIn = el('cap-input');
+    if (capIn) capIn.onkeydown = (e: any) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.sendCapture(); };
+    const aiIn = el('ai-input');
+    if (aiIn) aiIn.onkeydown = (e: any) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.sendAi(); };
+  }
+
+  /** Render the active role's view from current context. */
+  private renderRole(): void {
+    switch (this.session.role) {
+      case 'Actions': this.renderActions(); break;
+      case 'Status': this.renderStatus(); break;
+      case 'Project': this.renderProject(); break;
+      case 'Logs': this.renderLogs(); break;
+      case 'Capture': this.renderCapture(); break;
+      case 'AI': this.renderAI(); break;
+      default: this.renderContext();
+    }
+  }
+
+  // --- Project: operator dashboard ---------------------------------------------
+
+  private renderProject(): void {
+    const c = this.context;
+    const pulse = c['workspace.hostPulse'] as { uptimeSec: number } | undefined;
+    const mode = String(c['workspace.hostMode'] ?? '—');
+    const dev = c['workspace.devices'] as { live: number; paired: number } | undefined;
+
+    const hero = el('prj-hero');
+    hero.innerHTML = '<div class="eyebrow">Active project</div><div class="name"></div><div class="meta"></div>';
+    hero.querySelector('.name').textContent = String(c['workspace.activeProject'] ?? '—');
+    const meta = hero.querySelector('.meta');
+    const addMeta = (label: string, val: string) => {
+      const s = document.createElement('span'); s.textContent = label + ' ';
+      const b = document.createElement('b'); b.textContent = val; s.appendChild(b); meta.appendChild(s);
+    };
+    addMeta('mode', mode);
+    addMeta('uptime', fmtUptime(pulse?.uptimeSec));
+    if (dev) addMeta('devices', `${dev.live} live / ${dev.paired} paired`);
+
+    const paired = (c['workspace.pairedDevices'] as Array<{ deviceId: string; role: string }>) ?? [];
+    const dl = el('prj-devices'); dl.innerHTML = '';
+    if (!paired.length) dl.innerHTML = '<div class="empty">No devices paired yet.</div>';
+    else for (const d of paired) {
+      const card = document.createElement('div'); card.className = 'card';
+      const row = document.createElement('div'); row.className = 'dev-row';
+      const rc = document.createElement('div'); rc.className = 'rc'; rc.textContent = ROLE_CODE[d.role] ?? d.role;
+      const did = document.createElement('div'); did.className = 'did'; did.textContent = d.deviceId;
+      row.append(rc, did); card.appendChild(row); dl.appendChild(card);
+    }
+
+    const vits = el('prj-vitals'); vits.innerHTML = '';
+    const rows: [string, string][] = [
+      ['cores', String(c['workspace.cores'] ?? '—')],
+      ['platform', String(c['workspace.platform'] ?? '—')],
+      ['load 1m', String(c['workspace.load'] ?? '—')],
+      ['mode', mode],
+    ];
+    for (const [k, v] of rows) {
+      const card = document.createElement('div'); card.className = 'card';
+      const kd = document.createElement('div'); kd.className = 'k'; kd.textContent = k;
+      const vd = document.createElement('div'); vd.className = 'v'; vd.textContent = v;
+      card.append(kd, vd); vits.appendChild(card);
+    }
+  }
+
+  // --- Logs: live stream + command history -------------------------------------
+
+  private renderLogs(): void {
+    const logs = (this.context['workspace.logs'] as Array<{ ts: string; level: string; scope: string; msg: string }>) ?? [];
+    const stream = el('log-stream'); stream.innerHTML = '';
+    if (!logs.length) stream.innerHTML = '<div class="empty" style="padding:13px">No log activity yet.</div>';
+    else for (const r of logs) {
+      const row = document.createElement('div'); row.className = 'logrow';
+      const t = document.createElement('time'); t.textContent = (r.ts ?? '').slice(11, 19);
+      const lv = document.createElement('span'); lv.className = 'lv ' + r.level; lv.textContent = r.level;
+      const lm = document.createElement('div'); lm.className = 'lm';
+      const sc = document.createElement('span'); sc.className = 'sc'; sc.textContent = shortScope(r.scope) + ' ';
+      lm.append(sc, document.createTextNode(r.msg));
+      row.append(t, lv, lm); stream.appendChild(row);
+    }
+    stream.scrollTop = stream.scrollHeight;
+
+    const hist = (this.context['workspace.commandHistory'] as any[]) ?? [];
+    const ch = el('cmd-history'); ch.innerHTML = '';
+    if (!hist.length) ch.innerHTML = '<div class="empty">No commands run yet.</div>';
+    else for (const h of [...hist].reverse().slice(0, 12)) {
+      const card = document.createElement('div'); card.className = 'card';
+      const kd = document.createElement('div'); kd.className = 'k';
+      kd.textContent = String(h.status ?? '—') + (h.exitCode != null ? ` · exit ${h.exitCode}` : '');
+      const vd = document.createElement('div'); vd.className = 'v';
+      vd.textContent = `${h.intentId ?? ''}${h.elapsedMs != null ? ` · ${h.elapsedMs}ms` : ''}\n${(h.at ?? '').slice(11, 19)}`;
+      card.append(kd, vd); ch.appendChild(card);
+    }
+  }
+
+  // --- Capture: notes ----------------------------------------------------------
+
+  private renderCapture(): void {
+    const caps = (this.context['workspace.captures'] as Array<{ id: string; text: string; at: string }>) ?? [];
+    const list = el('cap-list'); list.innerHTML = '';
+    if (!caps.length) { list.innerHTML = '<div class="empty">No captures yet — your notes will appear here.</div>'; return; }
+    for (const cp of caps) {
+      const card = document.createElement('div'); card.className = 'card note';
+      const txt = document.createElement('div'); txt.className = 'txt'; txt.textContent = cp.text;
+      const t = document.createElement('time'); t.textContent = fmtWhen(cp.at);
+      card.append(txt, t); list.appendChild(card);
+    }
+  }
+
+  // --- AI: on-host assistant ---------------------------------------------------
+
+  private renderAI(): void {
+    const sg = (this.context['workspace.aiSuggestions'] as Array<{ label: string; query: string }>) ?? [];
+    const chips = el('ai-suggest'); chips.innerHTML = '';
+    for (const s of sg) {
+      const c = document.createElement('div'); c.className = 'chip'; c.textContent = s.label;
+      c.onclick = () => this.sendAi(s.query); chips.appendChild(c);
+    }
+    const thread = (this.context['workspace.aiContext'] as Array<{ role: string; text: string }>) ?? [];
+    const t = el('ai-thread'); t.innerHTML = '';
+    for (const m of thread) {
+      const d = document.createElement('div'); d.className = 'msg ' + (m.role === 'you' ? 'you' : 'assistant');
+      d.textContent = m.text; t.appendChild(d);
+    }
   }
 
   // --- Status: resource monitor ------------------------------------------------

@@ -17,10 +17,15 @@ import { ConflictSerialiser } from './conflict-serialiser.js';
 import { DispatchConfirmer } from './dispatch-confirmer.js';
 import { resolveIntent } from './command-resolver.js';
 
+/** A non-command intent handled in-process (e.g. Capture note, AI query). */
+export type DataIntentHandler = (intent: Intent) => Promise<{ status: IntentStatus; detail?: unknown }>;
+
 export interface DispatcherServices {
   policy: PolicyEngine;
   executorFor: (adapterId: string) => CommandExecutor | undefined;
   actions?: ActionsRegistry | undefined;
+  /** Intent types resolved as data operations rather than executor commands. */
+  dataHandlers?: Record<string, DataIntentHandler>;
 }
 
 export class IntentDispatcher {
@@ -40,6 +45,19 @@ export class IntentDispatcher {
 
   async handle(intent: Intent): Promise<void> {
     const conf = this.confirmer.begin(intent);
+
+    // Data intents (Capture notes, AI queries) are handled in-process — no
+    // executor, no subprocess. They still settle an explicit outcome. (FN-FN-010)
+    const dataHandler = this.deps.dataHandlers?.[intent.type];
+    if (dataHandler) {
+      try {
+        const r = await dataHandler(intent);
+        return conf.settle(r.status, r.detail);
+      } catch (err) {
+        this.log.warn('data intent failed', { type: intent.type, err: (err as Error).message });
+        return conf.settle('FAILURE', { reason: 'INTERNAL_ERROR' });
+      }
+    }
 
     const resolved = resolveIntent(intent, this.deps.actions);
     if (!resolved) {
