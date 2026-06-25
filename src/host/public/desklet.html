@@ -116,6 +116,13 @@
       .note .txt { font: 400 14px/1.5 var(--font-sans); color: var(--text); white-space: pre-wrap; word-break: break-word; }
       .note time { font: 500 10.5px/1 var(--font-mono); letter-spacing: 0.04em; color: var(--muted-2); }
 
+      /* AI — action-authoring banner */
+      .ai-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 17px; margin-bottom: 14px;
+        border: 1px solid #5b4420; border-radius: var(--r-card); background: linear-gradient(180deg, rgba(243,180,58,0.08), rgba(243,180,58,0.03)); }
+      .ai-banner-t { font: 700 13px/1.2 var(--font-sans); color: var(--signal); }
+      .ai-banner-s { font: 400 12.5px/1.45 var(--font-sans); color: var(--muted); margin-top: 3px; }
+      .ai-banner .btn { flex: 0 0 auto; padding: 10px 15px; }
+
       /* AI — assistant thread + suggestion chips */
       .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
       .chip { cursor: pointer; user-select: none; font: 600 12px/1 var(--font-sans); color: var(--text);
@@ -214,6 +221,13 @@
       </section>
 
       <section id="ai-view" class="hidden">
+        <div class="ai-banner">
+          <div class="ai-banner-txt">
+            <div class="ai-banner-t">Action authoring</div>
+            <div class="ai-banner-s">Open a Claude Code console on the host to create &amp; test actions in plain language.</div>
+          </div>
+          <button class="btn" id="ai-launch">Launch AI Console</button>
+        </div>
         <div class="chips" id="ai-suggest"></div>
         <div class="transcript" id="ai-thread"></div>
         <div class="composer">
@@ -241,6 +255,6 @@
       <span id="version">—</span>
     </footer>
 
-    <script src="/desklet.js?v=11"></script>
+    <script src="/desklet.js?v=12"></script>
   </body>
 </html>

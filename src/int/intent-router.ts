@@ -14,6 +14,7 @@ import type { ActionsRegistry } from '../actions/actions-registry.js';
 import type { WorkspaceContextStore } from '../ctx/workspace-context-store.js';
 import { IntentDispatcher } from './intent-dispatcher.js';
 import { buildDataHandlers } from './data-intent-handlers.js';
+import { launchAiConsole } from '../has/launch-ai-console.js';
 
 export class IntentRouter extends BaseSubsystem {
   readonly name = 'IntentRouter';
@@ -40,9 +41,9 @@ export class IntentRouter extends BaseSubsystem {
           if (adapterId && adapterId !== 'local') return this.services.tryGet<CommandExecutor>(SERVICE.AdapterFramework);
           return this.services.tryGet<CommandExecutor>(SERVICE.Executor);
         },
-        // Data intents (Capture notes, AI queries, action proposals) are
-        // role-scoped, default-deny.
-        dataHandlers: buildDataHandlers(ctxStore, actionsRegistry),
+        // Data intents (Capture notes, AI queries, action proposals, AI-console
+        // launch) are role-scoped, default-deny.
+        dataHandlers: buildDataHandlers(ctxStore, actionsRegistry, () => launchAiConsole(this.log)),
       },
       this.log.child('dispatch'),
       this.config.failureCircuitThreshold,

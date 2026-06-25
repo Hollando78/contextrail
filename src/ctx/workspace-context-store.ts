@@ -196,7 +196,7 @@ export class WorkspaceContextStore extends BaseSubsystem {
     if (!this.aiHistory.length) {
       this.aiHistory.push({
         role: 'assistant',
-        text: 'ContextRail assistant ready. Ask about host status, connected devices, or available actions.',
+        text: 'ContextRail assistant ready. Ask about host status, connected devices, or actions — or tap “Launch AI Console” to author a new action in plain language.',
         at: new Date().toISOString(),
       });
     }
@@ -232,6 +232,7 @@ export class WorkspaceContextStore extends BaseSubsystem {
             { label: 'Host status', query: 'status' },
             { label: 'Connected devices', query: 'devices' },
             { label: 'Available actions', query: 'actions' },
+            { label: 'Author an action', query: 'how do I add an action' },
           ],
           sourceEventType: 'ai',
         },
@@ -266,18 +267,23 @@ export class WorkspaceContextStore extends BaseSubsystem {
     };
     const statusLine = `Host is ${mode}. CPU ${cpu ?? '–'}%${mem ? `, memory ${mem.pct}% (${gb1(mem.usedMB)}/${gb1(mem.totalMB)} GB)` : ''}${disk ? `, disk ${disk.pct}%` : ''}. Uptime ${uptime(pulse?.uptimeSec)}.`;
 
+    // Authoring a new action — point to the host-side Claude Code console, which
+    // is the capability that can actually create/test/register actions.
+    if (/\b(add|create|author|make|new|automate|set ?up|build)\b/.test(ql) || /\blog ?in to\b/.test(ql)) {
+      return 'To create a new action — like logging in to a site or opening a tool — tap “Launch AI Console”. That opens a Claude Code terminal on the host, loaded with ContextRail skills: describe what you want and it will author the action, test it through the guardrails, and add it here. (Authoring runs on the host with destructive-command guardrails; I can\'t create actions from this view directly.)';
+    }
     if (/\b(help|what can you|capab|how do)\b/.test(ql)) {
-      return 'I report on this host from its live context. Try "status" for resources, "devices" for who is paired, or "actions" to see what the Actions role can run. I run entirely on-host — no data leaves this machine.';
+      return 'I report on this host from its live context: try "status" for resources, "devices" for who is paired, or "actions" to see what the Actions role can run. To CREATE an action, tap “Launch AI Console”. I run entirely on-host — no data leaves this machine.';
     }
     if (/\b(device|paired|connected|phone|tablet|who)\b/.test(ql)) {
       return dev
         ? `${dev.live} device${dev.live === 1 ? '' : 's'} live, ${dev.paired} paired in total.`
         : 'Device information is not available yet.';
     }
-    if (/\b(action|run|launch|open|do|tool)\b/.test(ql)) {
+    if (/\b(actions?|run|launch|open|tool)\b/.test(ql)) {
       return actions.length
-        ? `The Actions role can run: ${actions.map((a) => a.label).join(', ')}.`
-        : 'No actions are configured. Edit config/actions.json on the host to add some.';
+        ? `The Actions role can run: ${actions.map((a) => a.label).join(', ')}. To add another, tap “Launch AI Console”.`
+        : 'No actions are configured yet. Tap “Launch AI Console” to author one in plain language.';
     }
     if (/\b(status|health|cpu|memory|ram|disk|load|resource|uptime|how.*(doing|running|going))\b/.test(ql)) {
       return statusLine + (cores ? ` ${cores} cores, ${platform}.` : '');

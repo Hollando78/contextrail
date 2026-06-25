@@ -48,20 +48,20 @@ describe('Data intents are role-scoped (FN-FN-010, default-deny)', () => {
     receiptTimestamp: new Date().toISOString(),
   });
 
-  function dispatcherWith(store: { addCapture: (t: string) => void; runAssistant: (q: string) => void }, actions?: any) {
+  function dispatcherWith(store: { addCapture: (t: string) => void; runAssistant: (q: string) => void }, actions?: any, launch?: any) {
     const bus = new EventBus();
     const policy = { evaluate: () => ({ decision: 'ALLOW', permitId: 'p' }) } as never;
     const dispatcher = new IntentDispatcher(
       bus,
-      { policy, executorFor: () => undefined, dataHandlers: buildDataHandlers(store, actions) },
+      { policy, executorFor: () => undefined, dataHandlers: buildDataHandlers(store, actions, launch) },
       log,
       5,
     );
     return { bus, dispatcher };
   }
 
-  async function outcomeOf(type: string, role: Role, payload: Record<string, unknown>, store: any, actions?: any) {
-    const { bus, dispatcher } = dispatcherWith(store, actions);
+  async function outcomeOf(type: string, role: Role, payload: Record<string, unknown>, store: any, actions?: any, launch?: any) {
+    const { bus, dispatcher } = dispatcherWith(store, actions, launch);
     let status = '';
     bus.on('intent:outcome', (o) => { status = o.status; });
     await dispatcher.handle(mkIntent(type, role, payload));
@@ -108,5 +108,15 @@ describe('Data intents are role-scoped (FN-FN-010, default-deny)', () => {
     expect(await outcomeOf('action-propose', 'Status', { label: 'X', kind: 'url', target: 'https://x' }, store, actions)).toBe('DENIED');
     expect(await outcomeOf('action-propose', 'Actions', { label: 'X', kind: 'ssh', command: 'deploy', host: 'p' }, store, actions)).toBe('DENIED');
     expect(proposed).toHaveLength(1);
+  });
+
+  it('launches the AI console only for an AI desklet', async () => {
+    let launched = 0;
+    const store = { addCapture: () => {}, runAssistant: () => {} };
+    const launch = () => { launched++; return { ok: true, dir: '/x' }; };
+    expect(await outcomeOf('launch-console', 'AI', {}, store, undefined, launch)).toBe('SUCCESS');
+    expect(launched).toBe(1);
+    expect(await outcomeOf('launch-console', 'Status', {}, store, undefined, launch)).toBe('DENIED');
+    expect(launched).toBe(1);
   });
 });

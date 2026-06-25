@@ -19,11 +19,23 @@ export interface ActionProposer {
   propose(input: Record<string, unknown>, by: string): { proposalId: string };
 }
 
+/** Opens the host-side Claude Code action-authoring console. */
+export type ConsoleLauncher = () => { ok: boolean; dir?: string; error?: string };
+
 export function buildDataHandlers(
   store: CaptureAndAssistant | undefined,
   actions?: ActionProposer | undefined,
+  launchConsole?: ConsoleLauncher | undefined,
 ): Record<string, DataIntentHandler> {
   return {
+    // An AI desklet may ask the host to open the Claude Code action-authoring
+    // console (an interactive terminal on the operator's machine).
+    'launch-console': async (intent) => {
+      if (intent.role !== 'AI') return { status: 'DENIED', detail: { reason: 'PERMISSION_DENIED' } };
+      if (!launchConsole) return { status: 'FAILURE', detail: { reason: 'INTERNAL_ERROR' } };
+      const r = launchConsole();
+      return r.ok ? { status: 'SUCCESS', detail: { dir: r.dir } } : { status: 'FAILURE', detail: { reason: r.error } };
+    },
     // An Actions desklet may PROPOSE an action; it never activates until the
     // operator approves it on the host console. SSH actions are operator-only.
     'action-propose': async (intent) => {

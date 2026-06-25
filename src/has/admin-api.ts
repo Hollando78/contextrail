@@ -8,8 +8,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { launchAiConsole } from './launch-ai-console.js';
 import type { Logger } from '../core/logger.js';
 import type { AdminApi, ModeControl } from '../core/services.js';
 import type { MaintenanceConfigurationInterface } from '../acg/maintenance-configuration-interface.js';
@@ -202,20 +201,8 @@ export class HostAdminApi implements AdminApi {
    * the operator can author actions in natural language. Host-only (loopback).
    */
   private launchConsole(res: ServerResponse): void {
-    const dir = join(process.cwd(), 'ai-console');
-    try {
-      if (process.platform === 'win32') {
-        spawn('cmd', ['/c', 'start', 'ContextRail AI Console', 'cmd', '/k', `cd /d "${dir}" && claude`], { detached: true, stdio: 'ignore' }).unref();
-      } else if (process.platform === 'darwin') {
-        spawn('osascript', ['-e', `tell application "Terminal" to do script "cd \\"${dir}\\" && claude"`], { detached: true, stdio: 'ignore' }).unref();
-      } else {
-        spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && claude'`], { detached: true, stdio: 'ignore' }).unref();
-      }
-      this.deps.log.info('AI console launched', { dir });
-      this.send(res, 200, { ok: true, dir });
-    } catch (err) {
-      this.send(res, 500, { error: (err as Error).message });
-    }
+    const r = launchAiConsole(this.deps.log);
+    this.send(res, r.ok ? 200 : 500, r);
   }
 
   /** Vault: the stored secret NAMES only — values never leave the host. */

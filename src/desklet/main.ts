@@ -324,6 +324,19 @@ class DeskletClient {
     if (pfToggle) pfToggle.onclick = () => { const f = el('propose-form'); if (f) f.classList.toggle('hidden'); };
     const pfSend = el('pf-send');
     if (pfSend) pfSend.onclick = () => this.sendPropose();
+    const aiLaunch = el('ai-launch');
+    if (aiLaunch) aiLaunch.onclick = () => this.sendLaunchConsole();
+  }
+
+  /** Ask the host to open the Claude Code action-authoring console (AI role). */
+  private sendLaunchConsole(): void {
+    if (!this.ws || this.ws.readyState !== 1) return this.log('not connected', 'bad');
+    const correlationId = this.cid();
+    this.pending.set(correlationId, (ok, status) => {
+      this.log(ok ? 'AI console opened on host' : `launch ${status.toLowerCase()}`, ok ? 'ok' : 'bad');
+    });
+    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'launch-console', data: {} } }));
+    this.log('→ launch AI console');
   }
 
   /** Propose a new action (Actions role) for operator approval on the host. */
