@@ -69,6 +69,24 @@ describe('ActionsRegistry editing + persistence', () => {
     await expect(r.upsert({ label: 'Bad', kind: 'url' })).rejects.toThrow(/target/);
   });
 
+  it('accepts a login action with two secret refs and never leaks them to desklets', async () => {
+    const r = registryWith([]);
+    const def = await r.upsert({
+      label: 'Log in to Cloudflare', kind: 'login',
+      target: 'https://dash.cloudflare.com/login', secretRefs: ['cloudflare.username', 'cloudflare.password'],
+    });
+    expect(def.secretRefs).toEqual(['cloudflare.username', 'cloudflare.password']);
+    // the desklet-facing view carries no target and no secret refs
+    const view = r.views().find((v) => v.id === def.id);
+    expect(view).toEqual({ id: def.id, label: 'Log in to Cloudflare', kind: 'login' });
+    expect(JSON.stringify(r.views())).not.toContain('cloudflare.password');
+  });
+
+  it('rejects a login action without two secret refs', async () => {
+    const r = registryWith([]);
+    await expect(r.upsert({ label: 'L', kind: 'login', target: 'https://x', secretRefs: ['only.one'] })).rejects.toThrow(/secret refs/);
+  });
+
   it('removes an action by id', async () => {
     const r = registryWith([{ id: 'a', label: 'A', kind: 'app', target: 'notepad' }]);
     expect(await r.remove('a')).toBe(true);
@@ -121,5 +139,23 @@ describe('resolveIntent with action registry', () => {
 
   it('returns null for an unknown action id', () => {
     expect(resolveIntent(intent('action', { actionId: 'ghost' }), r)).toBeNull();
+  });
+});
+
+describe('resolveIntent for login actions', () => {
+  const r = registryWith([
+    { id: 'cf', label: 'Log in to Cloudflare', kind: 'login', target: 'https://dash.cloudflare.com/login', secretRefs: ['cf.user', 'cf.pass'] },
+  ]);
+
+  it('routes to the login helper with secret references, never plaintext', () => {
+    const res = resolveIntent(intent('action', { actionId: 'cf' }), r)!;
+    expect(res.principal).toBe('local');
+    expect(res.envelope.actionId).toBe('action:cf');
+    expect(res.envelope.detached).toBe(true);
+    expect(res.envelope.secretRefs).toEqual(['cf.user', 'cf.pass']);
+    // env carries only {{secret:…}} tokens + the URL — resolved at spawn, not here
+    expect(res.envelope.env['CR_LOGIN_URL']).toBe('https://dash.cloudflare.com/login');
+    expect(res.envelope.env['CR_LOGIN_USER']).toBe('{{secret:cf.user}}');
+    expect(res.envelope.env['CR_LOGIN_PASS']).toBe('{{secret:cf.pass}}');
   });
 });

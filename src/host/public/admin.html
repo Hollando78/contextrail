@@ -129,7 +129,10 @@
       <section class="card panel span2">
         <div class="act-head">
           <span class="eyebrow">Actions</span>
-          <button class="minibtn go" id="act-new">New action</button>
+          <span style="display:flex; gap:8px;">
+            <button class="minibtn" id="launch-console" title="Open a Claude Code terminal to author actions">Launch AI console</button>
+            <button class="minibtn go" id="act-new">New action</button>
+          </span>
         </div>
         <div id="proposals"></div>
         <div id="actionlist"></div>
@@ -141,6 +144,7 @@
               <option value="url">url — open a link</option>
               <option value="script">script — run an executable</option>
               <option value="ssh">ssh — allowlisted remote command</option>
+              <option value="login">login — open a site and sign in</option>
             </select>
           </label>
           <label class="full" id="w-target"><span class="eyebrow" id="l-target">Target</span><input id="f-target" autocomplete="off" /></label>
@@ -150,12 +154,30 @@
           <label class="hidden" id="w-class"><span class="eyebrow">Command class</span>
             <select id="f-class"><option value="bounded">bounded (30s)</option><option value="streaming">streaming</option></select>
           </label>
+          <label class="hidden" id="w-userref"><span class="eyebrow">Username secret</span><select id="f-userref"></select></label>
+          <label class="hidden" id="w-passref"><span class="eyebrow">Password secret</span><select id="f-passref"></select></label>
           <label><span class="eyebrow">Group (optional)</span><input id="f-group" autocomplete="off" /></label>
           <label><span class="eyebrow">Id (optional)</span><input id="f-id" autocomplete="off" placeholder="auto from label" /></label>
           <div class="form-actions">
             <span class="form-err" id="f-err"></span>
             <button type="button" class="minibtn" id="f-cancel">Cancel</button>
             <button type="submit" class="minibtn go" id="f-save">Save action</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card panel span2">
+        <div class="act-head">
+          <span class="eyebrow">Credentials</span>
+        </div>
+        <p class="empty-note" style="margin-bottom:14px">Encrypted on this host. Referenced by name in <code>login</code> actions — values never leave the machine or reach a desklet.</p>
+        <div id="credlist"></div>
+        <form id="cred-form" class="form-grid">
+          <label><span class="eyebrow">Name</span><input id="s-name" autocomplete="off" placeholder="service.field — e.g. cloudflare.password" /></label>
+          <label><span class="eyebrow">Value</span><input id="s-value" type="password" autocomplete="new-password" placeholder="stored encrypted" /></label>
+          <div class="form-actions">
+            <span class="form-err" id="s-err"></span>
+            <button type="submit" class="minibtn go" id="s-save">Store secret</button>
           </div>
         </form>
       </section>
@@ -300,17 +322,33 @@
       }
 
       // --- Actions editor ---------------------------------------------------
-      const KIND_TARGET_LABEL = { app: 'Application or path', url: 'URL', script: 'Script / executable path' };
+      const KIND_TARGET_LABEL = { app: 'Application or path', url: 'URL', script: 'Script / executable path', login: 'Login URL' };
+      let vaultNames = [];
 
       function updateKindFields() {
         const kind = $('f-kind').value;
         const ssh = kind === 'ssh';
+        const login = kind === 'login';
         $('w-target').classList.toggle('hidden', ssh);
         $('w-args').classList.toggle('hidden', kind !== 'script');
         $('w-command').classList.toggle('hidden', !ssh);
         $('w-host').classList.toggle('hidden', !ssh);
         $('w-class').classList.toggle('hidden', !ssh);
+        $('w-userref').classList.toggle('hidden', !login);
+        $('w-passref').classList.toggle('hidden', !login);
         if (!ssh) $('l-target').textContent = KIND_TARGET_LABEL[kind] || 'Target';
+      }
+
+      function fillRefSelect(sel, chosen) {
+        sel.innerHTML = '';
+        if (!vaultNames.length) {
+          const o = document.createElement('option'); o.value = ''; o.textContent = '(store a credential first)';
+          sel.appendChild(o); return;
+        }
+        for (const n of vaultNames) {
+          const o = document.createElement('option'); o.value = n; o.textContent = n;
+          if (n === chosen) o.selected = true; sel.appendChild(o);
+        }
       }
 
       function openForm(action) {
@@ -323,6 +361,9 @@
         $('f-command').value = action && action.command ? action.command : '';
         $('f-host').value = action && action.host ? action.host : '';
         $('f-class').value = action && action.commandClass ? action.commandClass : 'bounded';
+        const refs = (action && action.secretRefs) || [];
+        fillRefSelect($('f-userref'), refs[0]);
+        fillRefSelect($('f-passref'), refs[1]);
         $('f-group').value = action && action.group ? action.group : '';
         updateKindFields();
         $('action-form').classList.remove('hidden');
@@ -348,6 +389,9 @@
           action.command = $('f-command').value.trim();
           action.host = $('f-host').value.trim();
           action.commandClass = $('f-class').value;
+        } else if (kind === 'login') {
+          action.target = $('f-target').value.trim();
+          action.secretRefs = [$('f-userref').value, $('f-passref').value];
         } else {
           action.target = $('f-target').value.trim();
           if (kind === 'script') {
@@ -364,6 +408,65 @@
         } catch (err) { $('f-err').textContent = err.message; }
       }
 
+      async function testAction(id, btn) {
+        const prev = btn.textContent; btn.textContent = 'Testing…'; btn.disabled = true;
+        try {
+          const d = await postActions({ op: 'test', id });
+          const st = (d.outcome && d.outcome.status) || (d.ok ? 'SUCCESS' : 'FAILURE');
+          alert('Test ' + id + ': ' + st);
+        } catch (e) { alert('Test failed: ' + e.message); }
+        btn.textContent = prev; btn.disabled = false;
+      }
+
+      async function loadVault() {
+        try {
+          const d = await (await fetch('/admin/vault')).json();
+          vaultNames = d.names || [];
+        } catch { vaultNames = []; }
+        renderCreds();
+      }
+
+      function renderCreds() {
+        const list = $('credlist');
+        if (!vaultNames.length) { list.innerHTML = '<div class="empty-note">No credentials stored.</div>'; return; }
+        list.innerHTML = '';
+        for (const name of vaultNames) {
+          const row = document.createElement('div'); row.className = 'act-row';
+          const k = document.createElement('span'); k.className = 'k'; k.textContent = 'secret';
+          const info = document.createElement('div'); info.className = 'info';
+          info.innerHTML = '<div class="nm"></div><div class="tg">stored · value hidden</div>';
+          info.querySelector('.nm').textContent = name;
+          const del = document.createElement('button'); del.className = 'minibtn danger'; del.textContent = 'Delete';
+          del.onclick = async () => { if (confirm('Delete secret "' + name + '"?')) { await postVault({ op: 'remove', name }); loadVault(); } };
+          row.append(k, info, del); list.appendChild(row);
+        }
+      }
+
+      async function postVault(payload) {
+        const res = await fetch('/admin/vault', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        return data;
+      }
+
+      async function saveSecret(e) {
+        e.preventDefault();
+        const name = $('s-name').value.trim(), value = $('s-value').value;
+        if (!name || !value) { $('s-err').textContent = 'name and value required'; return; }
+        try {
+          await postVault({ op: 'set', name, value });
+          $('s-name').value = ''; $('s-value').value = ''; $('s-err').textContent = '';
+          loadVault();
+        } catch (err) { $('s-err').textContent = err.message; }
+      }
+
+      async function launchConsole() {
+        try {
+          const d = await (await fetch('/admin/launch-console', { method: 'POST' })).json();
+          if (!d.ok) throw new Error(d.error || 'launch failed');
+        } catch (e) { alert('Launch failed: ' + e.message + '\n\nRun it manually: cd ai-console && claude'); }
+      }
+
       function renderActionList(actions) {
         const list = $('actionlist');
         if (!actions.length) { list.innerHTML = '<div class="empty-note">No actions yet — add one to populate the Actions desklet.</div>'; return; }
@@ -377,11 +480,13 @@
           info.innerHTML = '<div class="nm"></div><div class="tg"></div>';
           info.querySelector('.nm').textContent = a.label;
           info.querySelector('.tg').textContent = tgt + '  ·  ' + a.id;
+          const test = document.createElement('button'); test.className = 'minibtn'; test.textContent = 'Test';
+          test.onclick = () => testAction(a.id, test);
           const edit = document.createElement('button'); edit.className = 'minibtn'; edit.textContent = 'Edit';
           edit.onclick = () => openForm(a);
           const del = document.createElement('button'); del.className = 'minibtn danger'; del.textContent = 'Delete';
           del.onclick = async () => { if (confirm('Delete action "' + a.label + '"?')) { await postActions({ op: 'remove', id: a.id }); loadActions(); } };
-          row.append(k, info, edit, del);
+          row.append(k, info, test, edit, del);
           list.appendChild(row);
         }
       }
@@ -418,14 +523,18 @@
       $('f-cancel').onclick = closeForm;
       $('f-kind').onchange = updateKindFields;
       $('action-form').onsubmit = saveAction;
+      $('cred-form').onsubmit = saveSecret;
+      $('launch-console').onclick = launchConsole;
 
       renderRoles();
       mint();
       refreshDevices();
+      loadVault();
       loadActions();
       timer = setInterval(tick, 1000);
       setInterval(refreshDevices, 3000);
       setInterval(loadActions, 4000);
+      setInterval(loadVault, 6000);
     </script>
   </body>
 </html>

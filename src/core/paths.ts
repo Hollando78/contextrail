@@ -35,6 +35,8 @@ export function dataPaths(dataDir: string) {
     adapterRegistry: join(root, 'adapter-registry.jsonl'),
     contextSnapshot: join(root, 'context-snapshot.json'),
     captures: join(root, 'captures.jsonl'),
+    credentials: join(root, 'credentials.enc.json'),
+    vaultKey: join(root, 'vault.key'),
     deepSocket:
       process.platform === 'win32'
         ? join('\\\\.\\pipe\\contextrail-deep')

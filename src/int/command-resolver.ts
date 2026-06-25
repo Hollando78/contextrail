@@ -7,8 +7,12 @@
  * Node invocation) so the action loop genuinely spawns, captures output, and
  * enforces the timeout without launching anything destructive by default.
  */
+import { fileURLToPath } from 'node:url';
 import type { Intent, CommandEnvelope } from '../core/types.js';
 import type { ActionsRegistry } from '../actions/actions-registry.js';
+
+/** The bundled, best-effort login helper (opens the URL, types injected creds). */
+const LOGIN_HELPER = fileURLToPath(new URL('../../scripts/login-helper.mjs', import.meta.url));
 
 export interface Resolved {
   envelope: Omit<CommandEnvelope, 'permitId'>;
@@ -93,6 +97,29 @@ export function resolveIntent(intent: Intent, actions?: ActionsRegistry): Resolv
       };
     }
     const gatedId = `action:${def.id}`;
+    if (def.kind === 'login') {
+      // Open the URL and run the login helper. Secrets are referenced by name only;
+      // the Process Supervisor substitutes the `{{secret:…}}` tokens at spawn.
+      const refs = def.secretRefs ?? [];
+      return {
+        envelope: {
+          actionId: gatedId,
+          adapterId: 'local',
+          targetPath: process.execPath,
+          args: [LOGIN_HELPER],
+          env: {
+            CR_LOGIN_URL: def.target ?? '',
+            CR_LOGIN_USER: `{{secret:${refs[0] ?? ''}}}`,
+            CR_LOGIN_PASS: `{{secret:${refs[1] ?? ''}}}`,
+          },
+          secretRefs: refs,
+          intentId,
+          detached: true,
+        },
+        principal: 'local',
+        conflictKey: `action:${def.id}`,
+      };
+    }
     if (def.kind === 'script') {
       return {
         envelope: { actionId: gatedId, adapterId: 'local', targetPath: def.target ?? process.execPath, args: def.args ?? [], env: {}, intentId },

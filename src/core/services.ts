@@ -12,6 +12,7 @@ export const SERVICE = {
   LockState: 'slm.lock',
   ContextAccessGuard: 'slm.guard',
   HostAuthenticator: 'slm.auth',
+  CredentialVault: 'slm.vault',
   PolicyEngine: 'acg.policy',
   AllowlistStore: 'acg.store',
   MaintenanceConfig: 'acg.maint',

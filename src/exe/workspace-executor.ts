@@ -10,6 +10,7 @@ import { BaseSubsystem, type RuntimeContext, type SubsystemHealth } from '../cor
 import { SERVICE } from '../core/services.js';
 import type { CommandEnvelope, CommandResult } from '../core/types.js';
 import type { PolicyEngine } from '../acg/policy-engine.js';
+import type { CredentialVault } from '../slm/credential-vault.js';
 import { ProcessSupervisor } from './process-supervisor.js';
 import { OutcomeReporter } from './outcome-reporter.js';
 import { CommandDispatcher, type CommandExecutor } from './command-dispatcher.js';
@@ -28,8 +29,11 @@ export class WorkspaceExecutor extends BaseSubsystem implements CommandExecutor 
 
   override async start(): Promise<void> {
     const policy = this.services.get<PolicyEngine>(SERVICE.PolicyEngine);
-    this.supervisor = new ProcessSupervisor(this.log.child('proc'), (intentId) =>
-      this.log.debug('execution started', { intentId }),
+    const vault = this.services.tryGet<CredentialVault>(SERVICE.CredentialVault);
+    this.supervisor = new ProcessSupervisor(
+      this.log.child('proc'),
+      (intentId) => this.log.debug('execution started', { intentId }),
+      vault ? (name) => vault.getSecret(name) : undefined,
     );
     this.reporter = new OutcomeReporter(this.bus);
     this.dispatcher = new CommandDispatcher(

@@ -60,6 +60,13 @@ export interface CommandEnvelope {
    * skip the wall-clock kill, so GUI apps / browser launches persist. Used for
    * launch-tool / open-url style actions where the OS launcher returns slowly. */
   detached?: boolean;
+  /**
+   * Names of Credential Vault secrets this command needs. The Process Supervisor
+   * resolves them at spawn into CR_SECRET_<NAME> env vars (and replaces
+   * `{{secret:NAME}}` tokens in env/args), so plaintext never enters the envelope,
+   * the action definition, logs, or any desklet projection. (SYS-REQ-001/005)
+   */
+  secretRefs?: string[];
 }
 
 /** Result of executing a command. (SUB-EXE-024, IFC-EXE-030) */

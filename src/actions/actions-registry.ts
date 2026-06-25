@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile } from 'node:fs';
 import type { Logger } from '../core/logger.js';
 
-export type ActionKind = 'app' | 'url' | 'script' | 'ssh';
+export type ActionKind = 'app' | 'url' | 'script' | 'ssh' | 'login';
 
 export interface ActionDef {
   /** Unique id (used for dispatch + allowlist gating). */
@@ -31,6 +31,11 @@ export interface ActionDef {
   host?: string;
   /** ssh: bounded (30s) or streaming (deploy/backup). */
   commandClass?: 'bounded' | 'streaming';
+  /**
+   * login: Credential Vault secret names to inject at run time, [user, password].
+   * Only the names are stored — never the secrets themselves. (SYS-REQ-005)
+   */
+  secretRefs?: string[];
   /** Optional grouping for the UI. */
   group?: string;
 }
@@ -121,8 +126,8 @@ export class ActionsRegistry {
    */
   private normalise(input: Partial<ActionDef>, takenIds: Set<string>): ActionDef {
     const kind = input.kind;
-    if (kind !== 'app' && kind !== 'url' && kind !== 'script' && kind !== 'ssh') {
-      throw new Error('kind must be app, url, script, or ssh');
+    if (kind !== 'app' && kind !== 'url' && kind !== 'script' && kind !== 'ssh' && kind !== 'login') {
+      throw new Error('kind must be app, url, script, ssh, or login');
     }
     const label = String(input.label ?? '').trim();
     if (!label) throw new Error('label is required');
@@ -154,6 +159,14 @@ export class ActionsRegistry {
       def.command = command;
       def.host = host;
       def.commandClass = input.commandClass === 'streaming' ? 'streaming' : 'bounded';
+    }
+    if (kind === 'login') {
+      const target = String(input.target ?? '').trim();
+      if (!target) throw new Error('login action requires a target URL');
+      const refs = Array.isArray(input.secretRefs) ? input.secretRefs.map((r) => String(r).trim()).filter(Boolean) : [];
+      if (refs.length < 2) throw new Error('login action requires two secret refs: [usernameSecret, passwordSecret]');
+      def.target = target;
+      def.secretRefs = refs.slice(0, 4);
     }
     return def;
   }

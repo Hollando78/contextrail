@@ -26,7 +26,27 @@ export class ProcessSupervisor {
   constructor(
     private readonly log: Logger,
     private readonly onStarted?: (intentId: string) => void,
+    /** Resolve a Credential Vault secret name to its plaintext (execution-time only). */
+    private readonly resolveSecret?: (name: string) => string | undefined,
   ) {}
+
+  /**
+   * Resolve secrets into the child's args/env at the last possible moment:
+   * `{{secret:NAME}}` tokens in args/env values are substituted, and each
+   * `secretRefs` entry is injected as CR_SECRET_<NAME>. Plaintext exists only in
+   * the spawned child's environment — never in the envelope, logs, or context.
+   */
+  private materialise(cmd: CommandEnvelope): { args: string[]; env: Record<string, string> } {
+    const sub = (s: string): string =>
+      s.replace(/\{\{secret:([a-z0-9._-]+)\}\}/gi, (_m, name: string) => this.resolveSecret?.(name) ?? '');
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cmd.env)) env[k] = sub(v);
+    for (const ref of cmd.secretRefs ?? []) {
+      const val = this.resolveSecret?.(ref);
+      if (val != null) env[`CR_SECRET_${ref.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`] = val;
+    }
+    return { args: cmd.args.map(sub), env };
+  }
 
   run(cmd: CommandEnvelope): Promise<ProcessResult> {
     if (cmd.detached) return this.runDetached(cmd);
@@ -36,8 +56,9 @@ export class ProcessSupervisor {
       let truncated = false;
       let settled = false;
 
-      const child = spawn(cmd.targetPath, cmd.args, {
-        env: { ...process.env, ...cmd.env },
+      const m = this.materialise(cmd);
+      const child = spawn(cmd.targetPath, m.args, {
+        env: { ...process.env, ...m.env },
         // New process group so a timeout SIGKILL takes the whole tree.
         detached: process.platform !== 'win32',
         windowsHide: true,
@@ -104,8 +125,9 @@ export class ProcessSupervisor {
       const done = (status: ProcessResult['status'], exitCode: number) =>
         resolve({ intentId: cmd.intentId, status, exitCode, stdoutDigest: '', truncated: false, elapsedMs: Date.now() - start });
       try {
-        const child = spawn(cmd.targetPath, cmd.args, {
-          env: { ...process.env, ...cmd.env },
+        const m = this.materialise(cmd);
+        const child = spawn(cmd.targetPath, m.args, {
+          env: { ...process.env, ...m.env },
           detached: true,
           stdio: 'ignore',
           windowsHide: false,

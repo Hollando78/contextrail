@@ -8,6 +8,8 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import type { Logger } from '../core/logger.js';
 import type { AdminApi, ModeControl } from '../core/services.js';
 import type { MaintenanceConfigurationInterface } from '../acg/maintenance-configuration-interface.js';
@@ -16,6 +18,9 @@ import type { HostAuthenticator } from '../slm/host-authenticator.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import type { RoleAssignmentManager } from '../pair/role-assignment-manager.js';
 import type { ActionsRegistry, ActionDef } from '../actions/actions-registry.js';
+import type { CredentialVault } from '../slm/credential-vault.js';
+import type { EventBus } from '../core/bus.js';
+import type { Intent } from '../core/types.js';
 import { isContextRailError } from '../core/errors.js';
 import { isRole, ROLES, type Role } from '../core/constants.js';
 import { dataPaths } from '../core/paths.js';
@@ -42,6 +47,8 @@ export interface AdminDeps {
   transport: DeviceControl;
   context: SubscriberControl;
   actions: ActionsRegistry;
+  vault: CredentialVault;
+  bus: EventBus;
   dataDir: string;
   log: Logger;
 }
@@ -61,6 +68,9 @@ export class HostAdminApi implements AdminApi {
       if (req.method === 'POST' && url.pathname === '/admin/device') return await this.device(req, res);
       if (req.method === 'GET' && url.pathname === '/admin/actions') return this.listActions(res);
       if (req.method === 'POST' && url.pathname === '/admin/actions') return await this.actions(req, res);
+      if (req.method === 'GET' && url.pathname === '/admin/vault') return this.listVault(res);
+      if (req.method === 'POST' && url.pathname === '/admin/vault') return await this.vaultOp(req, res);
+      if (req.method === 'POST' && url.pathname === '/admin/launch-console') return this.launchConsole(res);
       this.send(res, 404, { error: 'unknown admin route' });
     } catch (err) {
       if (isContextRailError(err)) return this.send(res, 409, err.toJSON());
@@ -124,7 +134,7 @@ export class HostAdminApi implements AdminApi {
    */
   private async actions(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const b = (await body(req)) as {
-      op?: 'upsert' | 'remove' | 'approve' | 'reject';
+      op?: 'upsert' | 'remove' | 'approve' | 'reject' | 'test';
       action?: Partial<ActionDef>;
       id?: string;
       proposalId?: string;
@@ -138,6 +148,9 @@ export class HostAdminApi implements AdminApi {
         case 'remove':
           if (!b.id) return this.send(res, 400, { error: 'id required' });
           return this.send(res, 200, { removed: await this.deps.actions.remove(b.id) });
+        case 'test':
+          if (!b.id) return this.send(res, 400, { error: 'id required' });
+          return await this.testAction(b.id, res);
         case 'approve': {
           if (!b.proposalId) return this.send(res, 400, { error: 'proposalId required' });
           const def = await this.deps.actions.approveProposal(b.proposalId);
@@ -149,6 +162,80 @@ export class HostAdminApi implements AdminApi {
         default:
           return this.send(res, 400, { error: 'op must be upsert|remove|approve|reject' });
       }
+    } catch (err) {
+      return this.send(res, 400, { error: (err as Error).message });
+    }
+  }
+
+  /**
+   * Test an action by running it through the real intent pipeline (ACG gate,
+   * guardrails, executor) and returning the outcome — so the operator (or the AI
+   * console) can verify a freshly-authored action before relying on it.
+   */
+  private async testAction(id: string, res: ServerResponse): Promise<void> {
+    if (!this.deps.actions.get(id)) return this.send(res, 404, { error: 'unknown action id' });
+    const intentId = `test-${id}-${Date.now()}`;
+    const intent: Intent = {
+      intentId,
+      correlationId: intentId,
+      deskletId: 'host-operator',
+      role: 'Actions',
+      type: 'action',
+      payload: { actionId: id },
+      receiptTimestamp: new Date().toISOString(),
+    };
+    const outcome = await new Promise<{ status: string; detail?: unknown } | null>((resolve) => {
+      const off = this.deps.bus.on('intent:outcome', (o) => {
+        if (o.intentId !== intentId) return;
+        off();
+        resolve({ status: o.status, detail: o.detail });
+      });
+      const timer = setTimeout(() => { off(); resolve(null); }, 8_000);
+      timer.unref?.();
+      this.deps.bus.emit('intent:received', intent);
+    });
+    this.send(res, 200, { ok: outcome?.status === 'SUCCESS', outcome: outcome ?? { status: 'TIMEOUT' } });
+  }
+
+  /**
+   * Launch a Claude Code terminal in the guardrailed `ai-console/` workspace, so
+   * the operator can author actions in natural language. Host-only (loopback).
+   */
+  private launchConsole(res: ServerResponse): void {
+    const dir = join(process.cwd(), 'ai-console');
+    try {
+      if (process.platform === 'win32') {
+        spawn('cmd', ['/c', 'start', 'ContextRail AI Console', 'cmd', '/k', `cd /d "${dir}" && claude`], { detached: true, stdio: 'ignore' }).unref();
+      } else if (process.platform === 'darwin') {
+        spawn('osascript', ['-e', `tell application "Terminal" to do script "cd \\"${dir}\\" && claude"`], { detached: true, stdio: 'ignore' }).unref();
+      } else {
+        spawn('x-terminal-emulator', ['-e', `bash -lc 'cd "${dir}" && claude'`], { detached: true, stdio: 'ignore' }).unref();
+      }
+      this.deps.log.info('AI console launched', { dir });
+      this.send(res, 200, { ok: true, dir });
+    } catch (err) {
+      this.send(res, 500, { error: (err as Error).message });
+    }
+  }
+
+  /** Vault: the stored secret NAMES only — values never leave the host. */
+  private listVault(res: ServerResponse): void {
+    this.send(res, 200, { names: this.deps.vault.names() });
+  }
+
+  private async vaultOp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const b = (await body(req)) as { op?: 'set' | 'remove'; name?: string; value?: string };
+    try {
+      if (b.op === 'set') {
+        if (!b.name || !b.value) return this.send(res, 400, { error: 'name and value required' });
+        this.deps.vault.setSecret(b.name, b.value);
+        return this.send(res, 200, { ok: true, names: this.deps.vault.names() });
+      }
+      if (b.op === 'remove') {
+        if (!b.name) return this.send(res, 400, { error: 'name required' });
+        return this.send(res, 200, { removed: this.deps.vault.remove(b.name), names: this.deps.vault.names() });
+      }
+      return this.send(res, 400, { error: 'op must be set|remove' });
     } catch (err) {
       return this.send(res, 400, { error: (err as Error).message });
     }

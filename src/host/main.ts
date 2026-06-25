@@ -14,6 +14,7 @@ import type { RuntimeContext, Subsystem } from '../core/subsystem.js';
 import { StubSubsystem } from '../core/stub-subsystem.js';
 import { ServiceRegistry } from '../core/services.js';
 import { ActionsRegistry } from '../actions/actions-registry.js';
+import { CredentialVault } from '../slm/credential-vault.js';
 import { resolve as resolvePath } from 'node:path';
 import { ConfigurationLoader } from '../hcr/configuration-loader.js';
 import { HostCoreRuntime } from '../hcr/host-core-runtime.js';
@@ -66,6 +67,12 @@ async function main(): Promise<void> {
   actions.load();
   actions.watch();
   ctx.services.set(SERVICE.Actions, actions);
+
+  // Encrypted credential vault (operator-managed, loopback-only) — backs `login`
+  // actions and any secret-referencing command. Secrets are resolved only at spawn.
+  const vault = new CredentialVault(dataDir, createLogger('vault'));
+  vault.load();
+  ctx.services.set(SERVICE.CredentialVault, vault);
 
   const hcr = new HostCoreRuntime(bus, log);
   // Expose a mode-control surface so the Host Admin Station can drive Maintenance.

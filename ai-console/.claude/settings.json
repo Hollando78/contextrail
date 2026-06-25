@@ -1,0 +1,50 @@
+{
+  "$comment": "ContextRail AI console — a guardrailed Claude Code workspace for authoring host actions in natural language. The PreToolUse hook hard-blocks destructive commands; the permission allowlist defines what Claude may do on this computer without prompting.",
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "WebFetch",
+      "WebSearch",
+      "Bash(curl http://127.0.0.1:8788/admin/*)",
+      "Bash(curl -s http://127.0.0.1:8788/admin/*)",
+      "Bash(curl -X POST http://127.0.0.1:8788/admin/*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(node --version)",
+      "Bash(where:*)",
+      "Bash(which:*)"
+    ],
+    "deny": [
+      "Bash(rm:*)",
+      "Bash(rmdir:*)",
+      "Bash(del:*)",
+      "Bash(erase:*)",
+      "Bash(format:*)",
+      "Bash(mkfs:*)",
+      "Bash(diskpart:*)",
+      "Bash(dd:*)",
+      "Bash(shutdown:*)",
+      "Bash(reboot:*)",
+      "Bash(reg delete:*)",
+      "Bash(sudo:*)",
+      "Bash(runas:*)",
+      "Read(./.git/**)",
+      "Read(../data/**)",
+      "Read(../certs/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guardrail.mjs\"" }
+        ]
+      }
+    ]
+  }
+}

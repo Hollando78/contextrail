@@ -14,6 +14,7 @@ import type { HostAuthenticator } from '../slm/host-authenticator.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import type { RoleAssignmentManager } from '../pair/role-assignment-manager.js';
 import type { ActionsRegistry } from '../actions/actions-registry.js';
+import type { CredentialVault } from '../slm/credential-vault.js';
 import { HostAdminApi, type DeviceControl, type SubscriberControl } from './admin-api.js';
 
 export class HostAdministrationStation extends BaseSubsystem {
@@ -35,6 +36,8 @@ export class HostAdministrationStation extends BaseSubsystem {
       transport: this.services.get<DeviceControl>(SERVICE.Transport),
       context: this.services.get<SubscriberControl>(SERVICE.ContextStore),
       actions: this.services.get<ActionsRegistry>(SERVICE.Actions),
+      vault: this.services.get<CredentialVault>(SERVICE.CredentialVault),
+      bus: this.bus,
       dataDir: this.config.dataDir,
       log: this.log.child('api'),
     });
