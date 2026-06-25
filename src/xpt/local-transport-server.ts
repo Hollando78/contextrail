@@ -20,6 +20,7 @@ import { resolveTls, type TlsMaterial } from './tls.js';
 import { ConnectionRegistry } from './connection-registry.js';
 import { ChannelMultiplexer } from './channel-multiplexer.js';
 import { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
+import { TerminalSessionManager } from './terminal-session-manager.js';
 import { HttpStaticAssetServer } from './http-static-asset-server.js';
 import { WebSocketGateway } from './websocket-gateway.js';
 import type { LockStateController } from '../slm/lock-state-controller.js';
@@ -39,6 +40,7 @@ export class LocalTransportServer extends BaseSubsystem {
   private registry!: ConnectionRegistry;
   private mux!: ChannelMultiplexer;
   private heartbeat!: TransportHeartbeatMonitor;
+  private terminal!: TerminalSessionManager;
   private gateway!: WebSocketGateway;
   private statics!: HttpStaticAssetServer;
   private locked = false;
@@ -73,6 +75,7 @@ export class LocalTransportServer extends BaseSubsystem {
     this.heartbeat = new TransportHeartbeatMonitor(this.registry, ledger, this.log.child('hbm'), (id) =>
       this.bus.emit('desklet:linklost', { deskletId: id }),
     );
+    this.terminal = new TerminalSessionManager((id, frame) => this.mux.send(id, frame), this.log.child('term'));
 
     this.statics = new HttpStaticAssetServer(
       pairing,
@@ -85,6 +88,7 @@ export class LocalTransportServer extends BaseSubsystem {
       {
         registry: this.registry,
         heartbeat: this.heartbeat,
+        terminal: this.terminal,
         pta,
         ledger,
         isLocked: () => this.locked || lock.isLocked(),
@@ -139,6 +143,7 @@ export class LocalTransportServer extends BaseSubsystem {
     for (const off of this.offs.splice(0)) off();
     if (this.watchedCertPath) unwatchFile(this.watchedCertPath);
     this.heartbeat?.stop();
+    this.terminal?.closeAll();
     this.gateway?.closeAll();
     await Promise.all([closeServer(this.httpsServer), closeServer(this.loopbackServer)]);
   }
@@ -214,6 +219,7 @@ export class LocalTransportServer extends BaseSubsystem {
   private onLock(): void {
     this.locked = true;
     // Close all active connections within 1 s (immediate). (SUB-XPT-044)
+    this.terminal.closeAll();
     this.gateway.closeAll();
     this.log.warn('transport locked — connections closed, upgrades rejected');
   }

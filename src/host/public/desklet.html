@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0b0e13" />
     <title>ContextRail</title>
     <link rel="stylesheet" href="/tokens.css?v=2" />
+    <link rel="stylesheet" href="/desklet.css?v=13" />
     <style>
       body { min-height: 100vh; display: flex; flex-direction: column; padding-top: env(safe-area-inset-top); }
 
@@ -123,6 +124,17 @@
       .ai-banner-s { font: 400 12.5px/1.45 var(--font-sans); color: var(--muted); margin-top: 3px; }
       .ai-banner .btn { flex: 0 0 auto; padding: 10px 15px; }
 
+      /* AI — embedded claude terminal */
+      .term-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+      #terminal { height: 64vh; min-height: 340px; padding: 8px 4px 4px 8px; background: #05070a;
+        border: 1px solid var(--rail); border-radius: var(--r-card); overflow: hidden; }
+      #terminal .xterm { height: 100%; }
+      /* When the console is open, the terminal takes over the AI view. */
+      #ai-view.term-active .ai-banner,
+      #ai-view.term-active .chips,
+      #ai-view.term-active #ai-thread,
+      #ai-view.term-active .composer { display: none; }
+
       /* AI — assistant thread + suggestion chips */
       .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
       .chip { cursor: pointer; user-select: none; font: 600 12px/1 var(--font-sans); color: var(--text);
@@ -226,7 +238,14 @@
             <div class="ai-banner-t">Action authoring</div>
             <div class="ai-banner-s">Open a Claude Code console on the host to create &amp; test actions in plain language.</div>
           </div>
-          <button class="btn" id="ai-launch">Launch AI Console</button>
+          <button class="btn" id="ai-launch">Open console</button>
+        </div>
+        <div id="terminal-wrap" class="hidden">
+          <div class="term-head">
+            <span class="eyebrow">AI Console · claude</span>
+            <button class="chip" id="term-close">Close</button>
+          </div>
+          <div id="terminal"></div>
         </div>
         <div class="chips" id="ai-suggest"></div>
         <div class="transcript" id="ai-thread"></div>
@@ -255,6 +274,6 @@
       <span id="version">—</span>
     </footer>
 
-    <script src="/desklet.js?v=12"></script>
+    <script src="/desklet.js?v=13"></script>
   </body>
 </html>

@@ -7,6 +7,10 @@
  * disconnect it reconnects with exponential back-off (capped 30 s) and re-binds
  * its role from the host without re-pairing. (SUB-DCF-051..055, SUB-KWD-068/074)
  */
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
+
 declare const navigator: { userAgent: string };
 declare const location: { href: string; search: string; host: string; protocol: string; pathname: string };
 declare const history: { replaceState(state: unknown, title: string, url: string): void };
@@ -131,6 +135,11 @@ class DeskletClient {
   private pending = new Map<string, (ok: boolean, status: string) => void>();
   /** rolling CPU samples for the Status sparkline. */
   private cpuHistory: number[] = [];
+  /** Embedded claude terminal (AI role). */
+  private term: Terminal | undefined;
+  private fit: FitAddon | undefined;
+  private termOpen = false;
+  private onWinResize: (() => void) | undefined;
 
   /** freshToken: true only right after pairing — the single-use session token is
    *  valid for exactly one connect. A session loaded from storage uses the
@@ -218,6 +227,12 @@ class DeskletClient {
         cb(ok, status);
       }
       this.log(`${ok ? 'ok' : 'fail'} · ${status.toLowerCase()}`, ok ? 'ok' : 'bad');
+    } else if (frame.kind === 'term') {
+      const p = frame.payload ?? {};
+      if (p.op === 'data' && this.term) this.term.write(p.data);
+      else if (p.op === 'exit' && this.term) {
+        this.term.write(`\r\n\x1b[33m[claude session ended${p.error ? ': ' + p.error : ''}]\x1b[0m\r\n`);
+      }
     } else if (frame.kind === 'control' && frame.payload?.type === 'role') {
       // The host re-binds the role on reconnect after a switch — adopt it so the
       // display (label + role-specific actions) matches the streamed context.
@@ -325,18 +340,61 @@ class DeskletClient {
     const pfSend = el('pf-send');
     if (pfSend) pfSend.onclick = () => this.sendPropose();
     const aiLaunch = el('ai-launch');
-    if (aiLaunch) aiLaunch.onclick = () => this.sendLaunchConsole();
+    if (aiLaunch) aiLaunch.onclick = () => this.openTerminal();
+    const termClose = el('term-close');
+    if (termClose) termClose.onclick = () => this.closeTerminal();
   }
 
-  /** Ask the host to open the Claude Code action-authoring console (AI role). */
-  private sendLaunchConsole(): void {
+  /** Open an embedded claude terminal: a host PTY streamed into xterm.js. */
+  private openTerminal(): void {
+    if (this.termOpen) return;
     if (!this.ws || this.ws.readyState !== 1) return this.log('not connected', 'bad');
-    const correlationId = this.cid();
-    this.pending.set(correlationId, (ok, status) => {
-      this.log(ok ? 'AI console opened on host' : `launch ${status.toLowerCase()}`, ok ? 'ok' : 'bad');
+    el('ai-view').classList.add('term-active');
+    el('terminal-wrap').classList.remove('hidden');
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: 'ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace',
+      fontSize: 13,
+      theme: { background: '#05070a', foreground: '#e7ebf1', cursor: '#f3b43a' },
+      scrollback: 5000,
     });
-    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type: 'launch-console', data: {} } }));
-    this.log('→ launch AI console');
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(el('terminal'));
+    fit.fit();
+    this.term = term;
+    this.fit = fit;
+    this.termOpen = true;
+
+    const sendTerm = (payload: Record<string, unknown>) => {
+      if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ kind: 'term', payload }));
+    };
+    sendTerm({ op: 'open', cols: term.cols, rows: term.rows });
+    term.onData((d: string) => sendTerm({ op: 'input', data: d }));
+    this.onWinResize = () => {
+      try {
+        fit.fit();
+        sendTerm({ op: 'resize', cols: term.cols, rows: term.rows });
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener('resize', this.onWinResize);
+    term.focus();
+    this.log('→ opened AI console');
+  }
+
+  private closeTerminal(): void {
+    if (!this.termOpen) return;
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ kind: 'term', payload: { op: 'close' } }));
+    if (this.onWinResize) { window.removeEventListener('resize', this.onWinResize); this.onWinResize = undefined; }
+    try { this.term?.dispose(); } catch { /* ignore */ }
+    this.term = undefined;
+    this.fit = undefined;
+    this.termOpen = false;
+    el('terminal-wrap').classList.add('hidden');
+    el('ai-view').classList.remove('term-active');
   }
 
   /** Propose a new action (Actions role) for operator approval on the host. */

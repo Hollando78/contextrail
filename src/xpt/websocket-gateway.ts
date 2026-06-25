@@ -16,6 +16,7 @@ import type { Role } from '../core/constants.js';
 import type { Intent, WsFrame } from '../core/types.js';
 import type { ConnectionRegistry } from './connection-registry.js';
 import type { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
+import type { TerminalSessionManager } from './terminal-session-manager.js';
 import type { PairingTokenAuthority } from '../slm/pairing-token-authority.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import { sha256Hex } from '../core/crypto.js';
@@ -25,6 +26,7 @@ let intentCounter = 0;
 export interface GatewayDeps {
   registry: ConnectionRegistry;
   heartbeat: TransportHeartbeatMonitor;
+  terminal: TerminalSessionManager;
   pta: PairingTokenAuthority;
   ledger: DeviceIdentityLedger;
   isLocked: () => boolean;
@@ -89,6 +91,7 @@ export class WebSocketGateway {
     ws.on('message', (data) => this.onMessage(deskletId, role, data.toString()));
     ws.on('close', () => {
       this.deps.registry.remove(deskletId);
+      this.deps.terminal.close(deskletId); // tear down any embedded claude PTY
       this.bus.emit('desklet:linklost', { deskletId });
       this.log.info('desklet disconnected', { deskletId });
     });
@@ -117,6 +120,14 @@ export class WebSocketGateway {
       this.bus.emit('intent:received', intent);
     } else if (frame.kind === 'ping') {
       this.deps.heartbeat.onPong(deskletId);
+    } else if (frame.kind === 'term') {
+      // Embedded claude terminal — AI role only. (default-deny)
+      if (role !== 'AI') return;
+      const p = (frame.payload ?? {}) as { op?: string; data?: string; cols?: number; rows?: number };
+      if (p.op === 'open') this.deps.terminal.open(deskletId, p.cols, p.rows);
+      else if (p.op === 'input') this.deps.terminal.input(deskletId, String(p.data ?? ''));
+      else if (p.op === 'resize') this.deps.terminal.resize(deskletId, Number(p.cols), Number(p.rows));
+      else if (p.op === 'close') this.deps.terminal.close(deskletId);
     }
   }
 

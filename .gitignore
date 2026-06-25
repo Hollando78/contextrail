@@ -17,4 +17,6 @@ config/actions.local.json
 .env
 src/host/public/desklet.js
 src/host/public/desklet.js.map
+src/host/public/desklet.css
+src/host/public/desklet.css.map
 coverage/
