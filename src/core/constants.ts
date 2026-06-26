@@ -9,7 +9,7 @@
 /** The desklet roles. Exactly one is bound per desklet. (STK-REQ-003, SYS-REQ-007)
  *  Remote extends the original six: it cycles/focuses host windows and relays
  *  input (e.g. nudging a waiting Claude session to continue). */
-export const ROLES = ['Project', 'Actions', 'Status', 'Capture', 'Logs', 'AI', 'Remote'] as const;
+export const ROLES = ['Project', 'Actions', 'Status', 'Capture', 'Logs', 'AI', 'Remote', 'Touchpad'] as const;
 export type Role = (typeof ROLES)[number];
 
 export function isRole(value: unknown): value is Role {

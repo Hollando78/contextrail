@@ -156,6 +156,18 @@
       .rm-keys { display: flex; flex-wrap: wrap; gap: 8px; }
       .chip.rk-go { color: #07101a; background: linear-gradient(180deg, #ffd071, var(--signal)); border-color: var(--signal); font-weight: 700; }
 
+      /* Touchpad */
+      .tp-pad { position: relative; height: 46vh; min-height: 230px; border: 1px solid var(--rail-2); border-radius: var(--r-card);
+        background: radial-gradient(130% 130% at 50% 0%, var(--housing-2), var(--housing)); touch-action: none; user-select: none;
+        display: grid; place-items: center; cursor: crosshair; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); transition: border-color var(--t); }
+      .tp-pad.active { border-color: var(--signal); }
+      .tp-pad .tp-hint { color: var(--muted-2); font: 400 12.5px/1.5 var(--font-sans); text-align: center; padding: 0 28px; pointer-events: none; }
+      .tp-btns { display: flex; gap: 10px; margin: 13px 0; }
+      .tp-btns .btn { flex: 1; }
+      .tp-scroll { height: 62px; border: 1px dashed var(--rail-2); border-radius: var(--r-card); background: var(--ink-2);
+        touch-action: none; user-select: none; display: grid; place-items: center; color: var(--muted-2);
+        font: 500 11px/1 var(--font-mono); letter-spacing: 0.06em; cursor: ns-resize; }
+
       /* Context — readout cards */
       .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 11px; }
       .card .k { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted-2); }
@@ -291,6 +303,17 @@
         </div>
       </section>
 
+      <section id="touchpad-view" class="hidden">
+        <div class="eyebrow sec">Touchpad</div>
+        <div class="tp-pad" id="tp-pad"><span class="tp-hint">drag to move the cursor · tap to click · two fingers: right-click or scroll</span></div>
+        <div class="tp-btns">
+          <button class="btn ghost" id="tp-left">Left click</button>
+          <button class="btn ghost" id="tp-right">Right click</button>
+          <button class="btn ghost" id="tp-double">Double-click</button>
+        </div>
+        <div class="tp-scroll" id="tp-scroll"><span>drag here to scroll ↕</span></div>
+      </section>
+
       <section id="context-view">
         <div class="eyebrow sec" id="context-title">Context</div>
         <div class="cards" id="context-cards"><div class="empty">waiting for context…</div></div>
@@ -310,6 +333,6 @@
       <span id="version">—</span>
     </footer>
 
-    <script src="/desklet.js?v=13"></script>
+    <script src="/desklet.js?v=14"></script>
   </body>
 </html>

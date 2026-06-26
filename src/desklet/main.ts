@@ -35,7 +35,7 @@ const el = (id: string) => document.getElementById(id);
 
 /** Instrument-style 3-letter role codes (no emoji). */
 const ROLE_CODE: Record<string, string> = {
-  Project: 'PRJ', Actions: 'ACT', Status: 'STA', Capture: 'CAP', Logs: 'LOG', AI: 'AI', Remote: 'REM',
+  Project: 'PRJ', Actions: 'ACT', Status: 'STA', Capture: 'CAP', Logs: 'LOG', AI: 'AI', Remote: 'REM', Touchpad: 'PAD',
 };
 
 /** Crisp line-art icons by action kind (stroke = currentColor). */
@@ -137,6 +137,8 @@ class DeskletClient {
   private cpuHistory: number[] = [];
   /** Remote role: process id of the currently-selected host window. */
   private selectedWindow = '';
+  /** Touchpad role: listeners are bound once. */
+  private tpWired = false;
   /** Embedded claude terminal (AI role). */
   private term: Terminal | undefined;
   private fit: FitAddon | undefined;
@@ -309,7 +311,7 @@ class DeskletClient {
   /** role -> its purpose-built view section id. */
   private static readonly VIEWS: Record<string, string> = {
     Actions: 'actions-view', Status: 'status-view', Project: 'project-view',
-    Logs: 'logs-view', Capture: 'capture-view', AI: 'ai-view', Remote: 'remote-view',
+    Logs: 'logs-view', Capture: 'capture-view', AI: 'ai-view', Remote: 'remote-view', Touchpad: 'touchpad-view',
   };
 
   private renderShell(): void {
@@ -320,7 +322,7 @@ class DeskletClient {
     el('device').textContent = this.session.deviceId;
     el('context-title').textContent = `${role} context`;
     const active = DeskletClient.VIEWS[role];
-    for (const id of ['actions-view', 'status-view', 'project-view', 'logs-view', 'capture-view', 'ai-view', 'remote-view']) {
+    for (const id of ['actions-view', 'status-view', 'project-view', 'logs-view', 'capture-view', 'ai-view', 'remote-view', 'touchpad-view']) {
       el(id).classList.toggle('hidden', id !== active);
     }
     // The generic context-view is only a fallback for an unrecognised role.
@@ -436,6 +438,86 @@ class DeskletClient {
     this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type, data } }));
   }
 
+  // --- Touchpad ----------------------------------------------------------------
+
+  /** Stream a pointer op to the host (fire-and-forget, no ack — kept smooth). */
+  private mouse(payload: Record<string, unknown>): void {
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ kind: 'mouse', payload }));
+  }
+
+  /** Bind the touch surface, buttons, and scroll strip (once). */
+  private setupTouchpad(): void {
+    if (this.tpWired) return;
+    const pad = el('tp-pad');
+    if (!pad) return;
+    this.tpWired = true;
+    const SENS = 1.7;
+    const avgY = (ts: any) => (ts.length > 1 ? (ts[0].clientY + ts[1].clientY) / 2 : ts[0].clientY);
+
+    // Touch: 1 finger moves (tap = click); 2 fingers = right-tap or scroll.
+    let last: { x: number; y: number } | null = null;
+    let moved = 0; let startT = 0; let fingers = 0; let twoY = 0;
+    pad.addEventListener('touchstart', (e: any) => {
+      e.preventDefault();
+      fingers = e.touches.length; moved = 0; startT = Date.now();
+      last = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      twoY = avgY(e.touches);
+      pad.classList.add('active');
+    }, { passive: false });
+    pad.addEventListener('touchmove', (e: any) => {
+      e.preventDefault();
+      if (e.touches.length >= 2) {
+        const y = avgY(e.touches); const dy = y - twoY; twoY = y;
+        if (Math.abs(dy) > 0.5) this.mouse({ op: 'scroll', dy: Math.round(-dy * 2) });
+        return;
+      }
+      if (!last) return;
+      const t = e.touches[0];
+      const dx = t.clientX - last.x; const dy = t.clientY - last.y;
+      last = { x: t.clientX, y: t.clientY };
+      moved += Math.abs(dx) + Math.abs(dy);
+      this.mouse({ op: 'move', dx: Math.round(dx * SENS), dy: Math.round(dy * SENS) });
+    }, { passive: false });
+    pad.addEventListener('touchend', (e: any) => {
+      e.preventDefault();
+      pad.classList.remove('active');
+      if (moved < 10 && Date.now() - startT < 300) this.mouse(fingers >= 2 ? { op: 'click', button: 'right' } : { op: 'click' });
+      last = null; fingers = 0;
+    }, { passive: false });
+
+    // Mouse fallback (desktop / devtools): drag = move, quick click = left click.
+    let md = false; let ml: { x: number; y: number } | null = null; let mMoved = 0; let mStart = 0;
+    pad.addEventListener('mousedown', (e: any) => { md = true; ml = { x: e.clientX, y: e.clientY }; mMoved = 0; mStart = Date.now(); pad.classList.add('active'); });
+    window.addEventListener('mousemove', (e: any) => {
+      if (!md || !ml) return;
+      const dx = e.clientX - ml.x; const dy = e.clientY - ml.y; ml = { x: e.clientX, y: e.clientY };
+      mMoved += Math.abs(dx) + Math.abs(dy);
+      this.mouse({ op: 'move', dx: Math.round(dx * SENS), dy: Math.round(dy * SENS) });
+    });
+    window.addEventListener('mouseup', () => {
+      if (!md) return; md = false; pad.classList.remove('active');
+      if (mMoved < 6 && Date.now() - mStart < 300) this.mouse({ op: 'click' });
+      ml = null;
+    });
+
+    const left = el('tp-left'); if (left) left.onclick = () => this.mouse({ op: 'click' });
+    const right = el('tp-right'); if (right) right.onclick = () => this.mouse({ op: 'click', button: 'right' });
+    const dbl = el('tp-double'); if (dbl) dbl.onclick = () => this.mouse({ op: 'double' });
+
+    // Scroll strip (touch + mouse drag, vertical).
+    const strip = el('tp-scroll');
+    if (strip) {
+      let sy: number | null = null;
+      const moveScroll = (y: number) => { if (sy == null) { sy = y; return; } const dy = y - sy; sy = y; if (Math.abs(dy) > 0.5) this.mouse({ op: 'scroll', dy: Math.round(-dy * 2) }); };
+      strip.addEventListener('touchstart', (e: any) => { e.preventDefault(); sy = e.touches[0].clientY; }, { passive: false });
+      strip.addEventListener('touchmove', (e: any) => { e.preventDefault(); moveScroll(e.touches[0].clientY); }, { passive: false });
+      strip.addEventListener('touchend', () => { sy = null; });
+      strip.addEventListener('mousedown', (e: any) => { sy = e.clientY; });
+      strip.addEventListener('mousemove', (e: any) => { if (sy != null) moveScroll(e.clientY); });
+      window.addEventListener('mouseup', () => { sy = null; });
+    }
+  }
+
   /** Open an embedded claude terminal: a host PTY streamed into xterm.js. */
   private openTerminal(): void {
     if (this.termOpen) return;
@@ -521,6 +603,7 @@ class DeskletClient {
       case 'Capture': this.renderCapture(); break;
       case 'AI': this.renderAI(); break;
       case 'Remote': this.renderRemote(); break;
+      case 'Touchpad': this.setupTouchpad(); break;
       default: this.renderContext();
     }
   }

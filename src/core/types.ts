@@ -171,7 +171,7 @@ export interface AllowlistEntry {
 
 /** WebSocket control/data frame envelope used on the desklet channel. */
 export interface WsFrame {
-  kind: 'context' | 'intent' | 'control' | 'ack' | 'error' | 'ping' | 'pong' | 'term';
+  kind: 'context' | 'intent' | 'control' | 'ack' | 'error' | 'ping' | 'pong' | 'term' | 'mouse';
   /** Sequence number for ordered context delivery. (IFC-XPT-041) */
   seq?: number;
   role?: Role;

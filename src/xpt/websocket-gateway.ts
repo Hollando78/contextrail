@@ -17,6 +17,7 @@ import type { Intent, WsFrame } from '../core/types.js';
 import type { ConnectionRegistry } from './connection-registry.js';
 import type { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
 import type { TerminalSessionManager } from './terminal-session-manager.js';
+import type { MouseControl } from '../has/mouse-control.js';
 import type { PairingTokenAuthority } from '../slm/pairing-token-authority.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import { sha256Hex } from '../core/crypto.js';
@@ -27,6 +28,7 @@ export interface GatewayDeps {
   registry: ConnectionRegistry;
   heartbeat: TransportHeartbeatMonitor;
   terminal: TerminalSessionManager;
+  mouse: MouseControl;
   pta: PairingTokenAuthority;
   ledger: DeviceIdentityLedger;
   isLocked: () => boolean;
@@ -92,6 +94,7 @@ export class WebSocketGateway {
     ws.on('close', () => {
       this.deps.registry.remove(deskletId);
       this.deps.terminal.close(deskletId); // tear down any embedded claude PTY
+      if (role === 'Touchpad') this.deps.mouse.releaseAll(); // don't leave a button held
       this.bus.emit('desklet:linklost', { deskletId });
       this.log.info('desklet disconnected', { deskletId });
     });
@@ -128,6 +131,10 @@ export class WebSocketGateway {
       else if (p.op === 'input') this.deps.terminal.input(deskletId, String(p.data ?? ''));
       else if (p.op === 'resize') this.deps.terminal.resize(deskletId, Number(p.cols), Number(p.rows));
       else if (p.op === 'close') this.deps.terminal.close(deskletId);
+    } else if (frame.kind === 'mouse') {
+      // Touchpad pointer control — Touchpad role only. (default-deny)
+      if (role !== 'Touchpad') return;
+      this.deps.mouse.handle((frame.payload ?? {}) as { op: 'move' | 'click' | 'double' | 'down' | 'up' | 'scroll' | 'hscroll' });
     }
   }
 

@@ -21,6 +21,7 @@ import { ConnectionRegistry } from './connection-registry.js';
 import { ChannelMultiplexer } from './channel-multiplexer.js';
 import { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
 import { TerminalSessionManager } from './terminal-session-manager.js';
+import { MouseControl } from '../has/mouse-control.js';
 import { HttpStaticAssetServer } from './http-static-asset-server.js';
 import { WebSocketGateway } from './websocket-gateway.js';
 import type { LockStateController } from '../slm/lock-state-controller.js';
@@ -41,6 +42,7 @@ export class LocalTransportServer extends BaseSubsystem {
   private mux!: ChannelMultiplexer;
   private heartbeat!: TransportHeartbeatMonitor;
   private terminal!: TerminalSessionManager;
+  private mouse!: MouseControl;
   private gateway!: WebSocketGateway;
   private statics!: HttpStaticAssetServer;
   private locked = false;
@@ -76,6 +78,7 @@ export class LocalTransportServer extends BaseSubsystem {
       this.bus.emit('desklet:linklost', { deskletId: id }),
     );
     this.terminal = new TerminalSessionManager((id, frame) => this.mux.send(id, frame), this.log.child('term'));
+    this.mouse = new MouseControl(this.log.child('mouse'));
 
     this.statics = new HttpStaticAssetServer(
       pairing,
@@ -89,6 +92,7 @@ export class LocalTransportServer extends BaseSubsystem {
         registry: this.registry,
         heartbeat: this.heartbeat,
         terminal: this.terminal,
+        mouse: this.mouse,
         pta,
         ledger,
         isLocked: () => this.locked || lock.isLocked(),
@@ -144,6 +148,7 @@ export class LocalTransportServer extends BaseSubsystem {
     if (this.watchedCertPath) unwatchFile(this.watchedCertPath);
     this.heartbeat?.stop();
     this.terminal?.closeAll();
+    this.mouse?.stop();
     this.gateway?.closeAll();
     await Promise.all([closeServer(this.httpsServer), closeServer(this.loopbackServer)]);
   }

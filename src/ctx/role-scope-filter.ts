@@ -21,8 +21,8 @@ export const DEFAULT_ATTRIBUTE_ROLES: Record<string, Role[]> = {
   windowLayout: ['Project'],
   toolStatus: ['Status'],
   health: ['Status'],
-  hostMode: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI', 'Remote'],
-  hostPulse: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI', 'Remote'],
+  hostMode: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI', 'Remote', 'Touchpad'],
+  hostPulse: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI', 'Remote', 'Touchpad'],
   // Remote-control: the host's open windows.
   windows: ['Remote'],
   pairedDevices: ['Status', 'Project'],
