@@ -21,8 +21,10 @@ export const DEFAULT_ATTRIBUTE_ROLES: Record<string, Role[]> = {
   windowLayout: ['Project'],
   toolStatus: ['Status'],
   health: ['Status'],
-  hostMode: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI'],
-  hostPulse: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI'],
+  hostMode: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI', 'Remote'],
+  hostPulse: ['Status', 'Project', 'Actions', 'Capture', 'Logs', 'AI', 'Remote'],
+  // Remote-control: the host's open windows.
+  windows: ['Remote'],
   pairedDevices: ['Status', 'Project'],
   // Resource-monitor metrics (Status role); a few host vitals also feed the
   // Project operator dashboard.

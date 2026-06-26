@@ -12,8 +12,9 @@ import type { PolicyEngine } from '../acg/policy-engine.js';
 import type { CommandExecutor } from '../exe/command-dispatcher.js';
 import type { ActionsRegistry } from '../actions/actions-registry.js';
 import type { WorkspaceContextStore } from '../ctx/workspace-context-store.js';
+import type { RemoteControl } from '../has/remote-control.js';
 import { IntentDispatcher } from './intent-dispatcher.js';
-import { buildDataHandlers } from './data-intent-handlers.js';
+import { buildDataHandlers, type RemotePort } from './data-intent-handlers.js';
 import { launchAiConsole } from '../has/launch-ai-console.js';
 
 export class IntentRouter extends BaseSubsystem {
@@ -31,6 +32,17 @@ export class IntentRouter extends BaseSubsystem {
     const policy = this.services.get<PolicyEngine>(SERVICE.PolicyEngine);
     const ctxStore = this.services.tryGet<WorkspaceContextStore>(SERVICE.ContextStore);
     const actionsRegistry = this.services.tryGet<ActionsRegistry>(SERVICE.Actions);
+    const remoteControl = this.services.tryGet<RemoteControl>(SERVICE.RemoteControl);
+    const remotePort: RemotePort | undefined =
+      remoteControl && ctxStore
+        ? {
+            enabled: () => remoteControl.enabled(),
+            focus: (id) => remoteControl.focus(id),
+            type: (id, text, enter) => remoteControl.type(id, text, enter),
+            key: (id, name) => remoteControl.key(id, name),
+            refresh: () => void ctxStore.publishWindows(),
+          }
+        : undefined;
     this.dispatcher = new IntentDispatcher(
       this.bus,
       {
@@ -42,8 +54,8 @@ export class IntentRouter extends BaseSubsystem {
           return this.services.tryGet<CommandExecutor>(SERVICE.Executor);
         },
         // Data intents (Capture notes, AI queries, action proposals, AI-console
-        // launch) are role-scoped, default-deny.
-        dataHandlers: buildDataHandlers(ctxStore, actionsRegistry, () => launchAiConsole(this.log)),
+        // launch, remote control) are role-scoped, default-deny.
+        dataHandlers: buildDataHandlers(ctxStore, actionsRegistry, () => launchAiConsole(this.log), remotePort),
       },
       this.log.child('dispatch'),
       this.config.failureCircuitThreshold,

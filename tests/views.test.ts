@@ -48,20 +48,20 @@ describe('Data intents are role-scoped (FN-FN-010, default-deny)', () => {
     receiptTimestamp: new Date().toISOString(),
   });
 
-  function dispatcherWith(store: { addCapture: (t: string) => void; runAssistant: (q: string) => void }, actions?: any, launch?: any) {
+  function dispatcherWith(store: { addCapture: (t: string) => void; runAssistant: (q: string) => void }, actions?: any, launch?: any, remote?: any) {
     const bus = new EventBus();
     const policy = { evaluate: () => ({ decision: 'ALLOW', permitId: 'p' }) } as never;
     const dispatcher = new IntentDispatcher(
       bus,
-      { policy, executorFor: () => undefined, dataHandlers: buildDataHandlers(store, actions, launch) },
+      { policy, executorFor: () => undefined, dataHandlers: buildDataHandlers(store, actions, launch, remote) },
       log,
       5,
     );
     return { bus, dispatcher };
   }
 
-  async function outcomeOf(type: string, role: Role, payload: Record<string, unknown>, store: any, actions?: any, launch?: any) {
-    const { bus, dispatcher } = dispatcherWith(store, actions, launch);
+  async function outcomeOf(type: string, role: Role, payload: Record<string, unknown>, store: any, actions?: any, launch?: any, remote?: any) {
+    const { bus, dispatcher } = dispatcherWith(store, actions, launch, remote);
     let status = '';
     bus.on('intent:outcome', (o) => { status = o.status; });
     await dispatcher.handle(mkIntent(type, role, payload));
@@ -118,5 +118,28 @@ describe('Data intents are role-scoped (FN-FN-010, default-deny)', () => {
     expect(launched).toBe(1);
     expect(await outcomeOf('launch-console', 'Status', {}, store, undefined, launch)).toBe('DENIED');
     expect(launched).toBe(1);
+  });
+
+  it('relays remote input only for a Remote desklet', async () => {
+    const typed: Array<{ id: string; text: string; enter: boolean }> = [];
+    const store = { addCapture: () => {}, runAssistant: () => {} };
+    const remote = {
+      enabled: () => true,
+      focus: async () => true,
+      type: async (id: string, text: string, enter: boolean) => { typed.push({ id, text, enter }); return true; },
+      key: async () => true,
+      refresh: () => {},
+    };
+    expect(await outcomeOf('remote-type', 'Remote', { windowId: '123', text: 'continue', enter: true }, store, undefined, undefined, remote)).toBe('SUCCESS');
+    expect(typed).toEqual([{ id: '123', text: 'continue', enter: true }]);
+    // wrong role is denied, and nothing is relayed
+    expect(await outcomeOf('remote-type', 'Actions', { windowId: '123', text: 'continue' }, store, undefined, undefined, remote)).toBe('DENIED');
+    expect(typed).toHaveLength(1);
+  });
+
+  it('fails remote intents when remote control is disabled', async () => {
+    const store = { addCapture: () => {}, runAssistant: () => {} };
+    const remote = { enabled: () => false, focus: async () => true, type: async () => true, key: async () => true, refresh: () => {} };
+    expect(await outcomeOf('remote-focus', 'Remote', { windowId: '1' }, store, undefined, undefined, remote)).toBe('FAILURE');
   });
 });

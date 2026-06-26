@@ -13,6 +13,7 @@ export const SERVICE = {
   ContextAccessGuard: 'slm.guard',
   HostAuthenticator: 'slm.auth',
   CredentialVault: 'slm.vault',
+  RemoteControl: 'has.remote',
   PolicyEngine: 'acg.policy',
   AllowlistStore: 'acg.store',
   MaintenanceConfig: 'acg.maint',

@@ -6,8 +6,10 @@
  * requirement ref(s) that fix it. Do not inline these numbers elsewhere.
  */
 
-/** The six desklet roles. Exactly one is bound per desklet. (STK-REQ-003, SYS-REQ-007) */
-export const ROLES = ['Project', 'Actions', 'Status', 'Capture', 'Logs', 'AI'] as const;
+/** The desklet roles. Exactly one is bound per desklet. (STK-REQ-003, SYS-REQ-007)
+ *  Remote extends the original six: it cycles/focuses host windows and relays
+ *  input (e.g. nudging a waiting Claude session to continue). */
+export const ROLES = ['Project', 'Actions', 'Status', 'Capture', 'Logs', 'AI', 'Remote'] as const;
 export type Role = (typeof ROLES)[number];
 
 export function isRole(value: unknown): value is Role {

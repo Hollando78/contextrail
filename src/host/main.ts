@@ -15,6 +15,7 @@ import { StubSubsystem } from '../core/stub-subsystem.js';
 import { ServiceRegistry } from '../core/services.js';
 import { ActionsRegistry } from '../actions/actions-registry.js';
 import { CredentialVault } from '../slm/credential-vault.js';
+import { RemoteControl } from '../has/remote-control.js';
 import { resolve as resolvePath } from 'node:path';
 import { ConfigurationLoader } from '../hcr/configuration-loader.js';
 import { HostCoreRuntime } from '../hcr/host-core-runtime.js';
@@ -73,6 +74,9 @@ async function main(): Promise<void> {
   const vault = new CredentialVault(dataDir, createLogger('vault'));
   vault.load();
   ctx.services.set(SERVICE.CredentialVault, vault);
+
+  // Remote-control capability (Remote desklet role): window list + input relay.
+  ctx.services.set(SERVICE.RemoteControl, new RemoteControl(createLogger('remote')));
 
   const hcr = new HostCoreRuntime(bus, log);
   // Expose a mode-control surface so the Host Admin Station can drive Maintenance.

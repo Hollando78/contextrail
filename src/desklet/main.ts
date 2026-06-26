@@ -35,7 +35,7 @@ const el = (id: string) => document.getElementById(id);
 
 /** Instrument-style 3-letter role codes (no emoji). */
 const ROLE_CODE: Record<string, string> = {
-  Project: 'PRJ', Actions: 'ACT', Status: 'STA', Capture: 'CAP', Logs: 'LOG', AI: 'AI',
+  Project: 'PRJ', Actions: 'ACT', Status: 'STA', Capture: 'CAP', Logs: 'LOG', AI: 'AI', Remote: 'REM',
 };
 
 /** Crisp line-art icons by action kind (stroke = currentColor). */
@@ -135,6 +135,8 @@ class DeskletClient {
   private pending = new Map<string, (ok: boolean, status: string) => void>();
   /** rolling CPU samples for the Status sparkline. */
   private cpuHistory: number[] = [];
+  /** Remote role: process id of the currently-selected host window. */
+  private selectedWindow = '';
   /** Embedded claude terminal (AI role). */
   private term: Terminal | undefined;
   private fit: FitAddon | undefined;
@@ -307,7 +309,7 @@ class DeskletClient {
   /** role -> its purpose-built view section id. */
   private static readonly VIEWS: Record<string, string> = {
     Actions: 'actions-view', Status: 'status-view', Project: 'project-view',
-    Logs: 'logs-view', Capture: 'capture-view', AI: 'ai-view',
+    Logs: 'logs-view', Capture: 'capture-view', AI: 'ai-view', Remote: 'remote-view',
   };
 
   private renderShell(): void {
@@ -318,7 +320,7 @@ class DeskletClient {
     el('device').textContent = this.session.deviceId;
     el('context-title').textContent = `${role} context`;
     const active = DeskletClient.VIEWS[role];
-    for (const id of ['actions-view', 'status-view', 'project-view', 'logs-view', 'capture-view', 'ai-view']) {
+    for (const id of ['actions-view', 'status-view', 'project-view', 'logs-view', 'capture-view', 'ai-view', 'remote-view']) {
       el(id).classList.toggle('hidden', id !== active);
     }
     // The generic context-view is only a fallback for an unrecognised role.
@@ -343,6 +345,95 @@ class DeskletClient {
     if (aiLaunch) aiLaunch.onclick = () => this.openTerminal();
     const termClose = el('term-close');
     if (termClose) termClose.onclick = () => this.closeTerminal();
+    const rmRefresh = el('rm-refresh');
+    if (rmRefresh) rmRefresh.onclick = () => this.remoteIntent('remote-refresh', {});
+    const rmSend = el('rm-send');
+    if (rmSend) rmSend.onclick = () => this.remoteSend();
+    const rmPrev = el('rm-prev'); if (rmPrev) rmPrev.onclick = () => this.remoteCycle(-1);
+    const rmNext = el('rm-next'); if (rmNext) rmNext.onclick = () => this.remoteCycle(1);
+    const keys = document.querySelectorAll('.rm-keys [data-rk]');
+    for (const b of keys) b.onclick = () => this.remoteKey(b.getAttribute('data-rk'));
+  }
+
+  // --- Remote control ----------------------------------------------------------
+
+  private remoteWindows(): Array<{ id: string; title: string; app: string }> {
+    return (this.context['workspace.windows'] as Array<{ id: string; title: string; app: string }>) ?? [];
+  }
+
+  private renderRemote(): void {
+    const wins = this.remoteWindows();
+    const wrap = el('rm-windows');
+    wrap.innerHTML = '';
+    if (!wins.length) {
+      wrap.innerHTML = '<div class="empty">No windows found — remote control may be disabled on the host (set CONTEXTRAIL_REMOTE_CONTROL=1) or this isn\'t Windows.</div>';
+      return;
+    }
+    if (this.selectedWindow && !wins.some((w) => w.id === this.selectedWindow)) this.selectedWindow = '';
+    for (const w of wins) {
+      const card = document.createElement('div');
+      card.className = 'card rm-win' + (w.id === this.selectedWindow ? ' sel' : '');
+      const t = document.createElement('div'); t.className = 'rm-title'; t.textContent = w.title;
+      const a = document.createElement('div'); a.className = 'rm-app'; a.textContent = w.app;
+      card.append(t, a);
+      card.onclick = () => this.remoteSelect(w.id);
+      wrap.appendChild(card);
+    }
+    this.remoteHint();
+  }
+
+  private remoteHint(): void {
+    const sel = this.remoteWindows().find((w) => w.id === this.selectedWindow);
+    this.setRemoteHint(sel ? `sending to: ${sel.title.slice(0, 44)}` : 'select a window above');
+  }
+
+  /** Select + focus a window on the host. */
+  private remoteSelect(id: string): void {
+    this.selectedWindow = id;
+    this.remoteIntent('remote-focus', { windowId: id });
+    this.renderRemote();
+  }
+
+  private remoteCycle(dir: number): void {
+    const wins = this.remoteWindows();
+    if (!wins.length) return;
+    const i = Math.max(0, wins.findIndex((w) => w.id === this.selectedWindow));
+    const next = wins[(i + dir + wins.length) % wins.length];
+    if (next) this.remoteSelect(next.id);
+  }
+
+  private remoteSend(): void {
+    const ta = el('rm-input');
+    const text = (ta?.value ?? '').trim();
+    if (!this.selectedWindow) return this.setRemoteHint('select a window first');
+    if (!text) return;
+    this.remoteIntent('remote-type', { windowId: this.selectedWindow, text, enter: true }, () => { ta.value = ''; });
+  }
+
+  private remoteKey(rk: string | null): void {
+    if (!rk) return;
+    if (!this.selectedWindow) return this.setRemoteHint('select a window first');
+    // "Continue" is the headline shortcut: type the word + Enter into the window.
+    if (rk === '__continue') {
+      this.remoteIntent('remote-type', { windowId: this.selectedWindow, text: 'continue', enter: true });
+    } else {
+      this.remoteIntent('remote-key', { windowId: this.selectedWindow, key: rk });
+    }
+  }
+
+  private setRemoteHint(text: string): void {
+    const hint = el('rm-hint');
+    if (hint) hint.textContent = text;
+  }
+
+  private remoteIntent(type: string, data: Record<string, unknown>, onOk?: () => void): void {
+    if (!this.ws || this.ws.readyState !== 1) return this.log('not connected', 'bad');
+    const correlationId = this.cid();
+    this.pending.set(correlationId, (ok, status) => {
+      if (ok) { onOk?.(); this.remoteHint(); }
+      else this.setRemoteHint(status === 'DENIED' ? 'not permitted' : status === 'FAILURE' ? 'send failed (remote disabled?)' : status.toLowerCase());
+    });
+    this.ws.send(JSON.stringify({ kind: 'intent', correlationId, payload: { type, data } }));
   }
 
   /** Open an embedded claude terminal: a host PTY streamed into xterm.js. */
@@ -429,6 +520,7 @@ class DeskletClient {
       case 'Logs': this.renderLogs(); break;
       case 'Capture': this.renderCapture(); break;
       case 'AI': this.renderAI(); break;
+      case 'Remote': this.renderRemote(); break;
       default: this.renderContext();
     }
   }

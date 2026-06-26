@@ -146,6 +146,16 @@
       .msg.you { align-self: flex-end; background: linear-gradient(180deg, #ffd071, var(--signal)); color: #07101a; border-bottom-right-radius: 5px; }
       .msg.assistant { align-self: flex-start; background: var(--housing-2); border: var(--hair); color: var(--text); border-bottom-left-radius: 5px; }
 
+      /* Remote control */
+      .rm-bar { display: flex; gap: 8px; }
+      .rm-win { cursor: pointer; transition: border-color var(--t), box-shadow var(--t); }
+      .rm-win:hover { border-color: #4a566a; }
+      .rm-win.sel { border-color: var(--signal); box-shadow: var(--e-1); }
+      .rm-win .rm-title { font: 600 13.5px/1.3 var(--font-sans); color: var(--text); word-break: break-word; }
+      .rm-win .rm-app { font: 500 11px/1 var(--font-mono); color: var(--muted-2); margin-top: 5px; }
+      .rm-keys { display: flex; flex-wrap: wrap; gap: 8px; }
+      .chip.rk-go { color: #07101a; background: linear-gradient(180deg, #ffd071, var(--signal)); border-color: var(--signal); font-weight: 700; }
+
       /* Context — readout cards */
       .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 11px; }
       .card .k { font: 600 10.5px/1 var(--font-mono); letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted-2); }
@@ -252,6 +262,32 @@
         <div class="composer">
           <textarea id="ai-input" rows="2" placeholder="Ask about host status, devices, or actions…"></textarea>
           <div class="composer-row"><span class="hint">on-host assistant</span><button class="btn" id="ai-send">Ask</button></div>
+        </div>
+      </section>
+
+      <section id="remote-view" class="hidden">
+        <div class="sec-head">
+          <div class="eyebrow sec">Windows</div>
+          <div class="rm-bar">
+            <button class="chip" id="rm-prev">‹ Prev</button>
+            <button class="chip" id="rm-next">Next ›</button>
+            <button class="chip" id="rm-refresh">Refresh</button>
+          </div>
+        </div>
+        <div class="cards" id="rm-windows"></div>
+        <div class="eyebrow sec">Send to selected window</div>
+        <div class="composer">
+          <textarea id="rm-input" rows="2" placeholder="Type text to send to the selected window…"></textarea>
+          <div class="composer-row"><span class="hint" id="rm-hint">select a window above</span><button class="btn" id="rm-send">Send</button></div>
+        </div>
+        <div class="eyebrow sec">Quick keys</div>
+        <div class="rm-keys">
+          <button class="chip rk-go" data-rk="__continue">Continue</button>
+          <button class="chip" data-rk="enter">Enter</button>
+          <button class="chip" data-rk="esc">Esc</button>
+          <button class="chip" data-rk="up">Up</button>
+          <button class="chip" data-rk="down">Down</button>
+          <button class="chip" data-rk="ctrl-c">Ctrl-C</button>
         </div>
       </section>
 

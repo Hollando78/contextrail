@@ -24,6 +24,7 @@ import { recentLogs } from '../core/logger.js';
 import { SystemMetrics } from '../host/system-metrics.js';
 import type { DeviceIdentityLedger } from '../pair/device-identity-ledger.js';
 import type { LocalTransportServer } from '../xpt/local-transport-server.js';
+import type { RemoteControl } from '../has/remote-control.js';
 
 export class WorkspaceContextStore extends BaseSubsystem {
   readonly name = 'WorkspaceContextStore';
@@ -122,6 +123,21 @@ export class WorkspaceContextStore extends BaseSubsystem {
         // Live host log tail for the Logs role (newest last).
         { attributePath: 'workspace.logs', newValue: recentLogs(40), sourceEventType: 'logs' },
       ],
+    });
+
+    // Window list is only enumerated (spawns PowerShell) when a Remote desklet
+    // is actually subscribed, so the pulse stays cheap for every other role.
+    if ([...this.subscribers.values()].includes('Remote')) await this.publishWindows();
+  }
+
+  /** Enumerate the host's open windows and stream them to Remote desklets. */
+  async publishWindows(): Promise<void> {
+    const remote = this.services.tryGet<RemoteControl>(SERVICE.RemoteControl);
+    if (!remote) return;
+    const windows = await remote.listWindows();
+    this.ingest({
+      type: 'raw',
+      writes: [{ attributePath: 'workspace.windows', newValue: windows, sourceEventType: 'remote' }],
     });
   }
 
@@ -322,6 +338,8 @@ export class WorkspaceContextStore extends BaseSubsystem {
     // Push an initial full snapshot so a freshly-joined desklet renders immediately.
     const snap = this.snapshotForRole(deskletId, role);
     if (snap) this.bus.emit('context:projection', snap);
+    // A Remote desklet needs the window list right away, not on the next pulse.
+    if (role === 'Remote') void this.publishWindows();
   }
 
   removeSubscriber(deskletId: string): void {

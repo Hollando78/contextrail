@@ -22,12 +22,63 @@ export interface ActionProposer {
 /** Opens the host-side Claude Code action-authoring console. */
 export type ConsoleLauncher = () => { ok: boolean; dir?: string; error?: string };
 
+/** Remote-control surface for the Remote desklet role. */
+export interface RemotePort {
+  enabled(): boolean;
+  focus(windowId: string): Promise<boolean>;
+  type(windowId: string, text: string, enter: boolean): Promise<boolean>;
+  key(windowId: string, name: string): Promise<boolean>;
+  /** Re-enumerate + re-stream the window list immediately. */
+  refresh(): void;
+}
+
 export function buildDataHandlers(
   store: CaptureAndAssistant | undefined,
   actions?: ActionProposer | undefined,
   launchConsole?: ConsoleLauncher | undefined,
+  remote?: RemotePort | undefined,
 ): Record<string, DataIntentHandler> {
+  const remoteGuard = (intent: { role: string }): { status: 'DENIED' | 'FAILURE' } | null => {
+    if (intent.role !== 'Remote') return { status: 'DENIED' };
+    if (!remote || !remote.enabled()) return { status: 'FAILURE' };
+    return null;
+  };
   return {
+    // Remote-control intents (Remote role only, default-deny). They focus a host
+    // window and relay input — e.g. typing "continue" into a Claude terminal.
+    'remote-refresh': async (intent) => {
+      const bad = remoteGuard(intent);
+      if (bad) return { status: bad.status, detail: { reason: bad.status === 'DENIED' ? 'PERMISSION_DENIED' : 'REMOTE_DISABLED' } };
+      remote!.refresh();
+      return { status: 'SUCCESS' };
+    },
+    'remote-focus': async (intent) => {
+      const bad = remoteGuard(intent);
+      if (bad) return { status: bad.status, detail: { reason: bad.status === 'DENIED' ? 'PERMISSION_DENIED' : 'REMOTE_DISABLED' } };
+      const id = String((intent.payload as { windowId?: unknown }).windowId ?? '');
+      const ok = await remote!.focus(id);
+      return ok ? { status: 'SUCCESS' } : { status: 'FAILURE', detail: { reason: 'FOCUS_FAILED' } };
+    },
+    'remote-type': async (intent) => {
+      const bad = remoteGuard(intent);
+      if (bad) return { status: bad.status, detail: { reason: bad.status === 'DENIED' ? 'PERMISSION_DENIED' : 'REMOTE_DISABLED' } };
+      const p = intent.payload as { windowId?: unknown; text?: unknown; enter?: unknown };
+      const id = String(p.windowId ?? '');
+      const text = String(p.text ?? '');
+      if (!id || !text) return { status: 'FAILURE', detail: { reason: 'INVALID_REQUEST' } };
+      const ok = await remote!.type(id, text, p.enter !== false);
+      return ok ? { status: 'SUCCESS' } : { status: 'FAILURE', detail: { reason: 'SEND_FAILED' } };
+    },
+    'remote-key': async (intent) => {
+      const bad = remoteGuard(intent);
+      if (bad) return { status: bad.status, detail: { reason: bad.status === 'DENIED' ? 'PERMISSION_DENIED' : 'REMOTE_DISABLED' } };
+      const p = intent.payload as { windowId?: unknown; key?: unknown };
+      const id = String(p.windowId ?? '');
+      const key = String(p.key ?? '');
+      if (!id || !key) return { status: 'FAILURE', detail: { reason: 'INVALID_REQUEST' } };
+      const ok = await remote!.key(id, key);
+      return ok ? { status: 'SUCCESS' } : { status: 'FAILURE', detail: { reason: 'SEND_FAILED' } };
+    },
     // An AI desklet may ask the host to open the Claude Code action-authoring
     // console (an interactive terminal on the operator's machine).
     'launch-console': async (intent) => {
