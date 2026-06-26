@@ -873,4 +873,31 @@ async function boot(): Promise<void> {
   new DeskletClient(session, freshToken).start();
 }
 
-window.addEventListener('DOMContentLoaded', () => void boot());
+/**
+ * PWA glue: register the (network-first) service worker so the desklet is
+ * installable + has an offline shell, and hold a screen wake lock so a
+ * dedicated desklet (Status board, Touchpad) doesn't sleep. Both require a
+ * secure context, so they silently no-op on an untrusted-cert LAN-IP origin.
+ */
+function registerPwa(): void {
+  const nav = navigator as any;
+  if (nav.serviceWorker) nav.serviceWorker.register('/sw.js').catch(() => {});
+  if (!nav.wakeLock) return;
+  let lock: any = null;
+  const acquire = async () => {
+    if (lock) return;
+    try {
+      lock = await nav.wakeLock.request('screen');
+      lock.addEventListener?.('release', () => { lock = null; });
+    } catch {
+      /* needs a visible doc / gesture; retried below */
+    }
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { lock = null; void acquire(); }
+  });
+  window.addEventListener('pointerdown', () => void acquire());
+  void acquire();
+}
+
+window.addEventListener('DOMContentLoaded', () => { registerPwa(); void boot(); });

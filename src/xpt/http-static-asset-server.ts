@@ -34,6 +34,8 @@ const MIME: Record<string, string> = {
   '.map': 'application/json',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
+  '.png': 'image/png',
 };
 
 export class HttpStaticAssetServer {
