@@ -120,8 +120,9 @@ export const TIMING = {
 export const TOKENS = {
   /** Unredeemed pairing/session token TTL. (SYS-REQ-002, SUB-SLM-001, IFC-PAIR-027) */
   PAIRING_TTL_MS: 60_000,
-  /** QR display token expiry if unused. (SUB-PAIR-035) */
-  QR_TOKEN_TTL_MS: 30_000,
+  /** QR display token expiry if unused. (SUB-PAIR-035) — widened from 30s to give
+   *  a phone a comfortable scan + load + accept-cert window before redeeming. */
+  QR_TOKEN_TTL_MS: 90_000,
   /** Minimum entropy of a pairing token. (SUB-PAIR-035) */
   ENTROPY_BITS: 128,
 } as const;
