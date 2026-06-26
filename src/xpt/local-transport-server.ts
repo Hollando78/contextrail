@@ -22,6 +22,7 @@ import { ChannelMultiplexer } from './channel-multiplexer.js';
 import { TransportHeartbeatMonitor } from './heartbeat-monitor.js';
 import { TerminalSessionManager } from './terminal-session-manager.js';
 import { MouseControl } from '../has/mouse-control.js';
+import { detectTailscaleName } from '../has/tailscale.js';
 import { HttpStaticAssetServer } from './http-static-asset-server.js';
 import { WebSocketGateway } from './websocket-gateway.js';
 import type { LockStateController } from '../slm/lock-state-controller.js';
@@ -43,6 +44,8 @@ export class LocalTransportServer extends BaseSubsystem {
   private heartbeat!: TransportHeartbeatMonitor;
   private terminal!: TerminalSessionManager;
   private mouse!: MouseControl;
+  /** Tailscale MagicDNS name (Serve target), advertised in pairing URLs once known. */
+  private tailscaleName: string | undefined;
   private gateway!: WebSocketGateway;
   private statics!: HttpStaticAssetServer;
   private locked = false;
@@ -83,9 +86,20 @@ export class LocalTransportServer extends BaseSubsystem {
     this.statics = new HttpStaticAssetServer(
       pairing,
       this.log.child('static'),
-      () => (this.tls.lanAddresses.length ? this.tls.lanAddresses : [this.config.host]),
+      () => {
+        const base = this.tls.lanAddresses.length ? this.tls.lanAddresses : [this.config.host];
+        // Advertise the Tailscale-Served name too (trusted cert on mobile).
+        return this.tailscaleName ? [...base, this.tailscaleName] : base;
+      },
       this.config.port,
     );
+    // Best-effort: discover the MagicDNS name so the QR can offer the ts.net URL.
+    void detectTailscaleName().then((n) => {
+      if (n) {
+        this.tailscaleName = n;
+        this.log.info('advertising tailscale serve name', { name: n });
+      }
+    });
 
     this.gateway = new WebSocketGateway(
       {
